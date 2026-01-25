@@ -29,8 +29,17 @@ const GOOGLE_COLOR_MAP: Record<string, string> = {
 };
 
 interface AgendaItem {
-  id: string; start: Date; end: Date; title: string; location: string;
-  category: 'work' | 'personal' | 'health' | 'social'; color: string; isAllDay: boolean; htmlLink: string;
+  id: string; 
+  start: Date; 
+  end: Date; 
+  title: string; 
+  location: string;
+  category: 'work' | 'personal' | 'health' | 'social'; 
+  color: string; 
+  isAllDay: boolean; 
+  htmlLink: string;
+  allDayStartStr?: string; // Store raw ISO date for precise comparison
+  allDayEndStr?: string;   // Store raw ISO date (exclusive)
 }
 
 interface WeatherData {
@@ -533,24 +542,29 @@ const GooglePhotosWidget = ({ accessToken, grantedScopes, onForceLogout, onReAut
 };
 
 const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onToggleCollapse }: { accessToken: string | null; items: AgendaItem[]; isLoading: boolean; onRefresh: () => void; isCollapsed: boolean; onToggleCollapse: () => void; }) => {
-  const [selectedTimezone, setSelectedTimezone] = useState<string>(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [selectedTimezone, setSelectedTimezone] = useState<string>('Europe/Brussels');
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; }), []);
   
   const getEventsForDay = (date: Date) => {
-    // Standard format for comparison: YYYY-MM-DD in selected timezone
+    // Current date string in the target timezone (e.g., "2023-10-23")
     const dayStr = date.toLocaleDateString('en-CA', { timeZone: selectedTimezone });
     
     return items.filter(item => { 
+      if (item.isAllDay && item.allDayStartStr && item.allDayEndStr) {
+        // Google all-day end dates are exclusive.
+        // If Oct 23 is all day: Start="2023-10-23", End="2023-10-24"
+        return dayStr >= item.allDayStartStr && dayStr < item.allDayEndStr;
+      }
+      
+      // For timed events, we check if the event spans any part of the requested day in the target timezone
       const startDayStr = item.start.toLocaleDateString('en-CA', { timeZone: selectedTimezone });
       const endDayStr = new Date(item.end.getTime() - 1).toLocaleDateString('en-CA', { timeZone: selectedTimezone });
-      
-      // Strict range check: Does the dayStr fall within the start/end day strings inclusive?
       return dayStr >= startDayStr && dayStr <= endDayStr;
     });
   };
 
   const toggleTimezone = () => {
-    setSelectedTimezone(prev => prev === 'UTC' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC');
+    setSelectedTimezone(prev => prev === 'UTC' ? 'Europe/Brussels' : 'UTC');
   };
 
   return (
@@ -565,7 +579,6 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
           )}
         </div>
 
-        {/* Timezone Toggle in the Middle Top */}
         <div className="absolute left-1/2 -translate-x-1/2 top-10 z-10">
           <button 
             onClick={toggleTimezone}
@@ -573,7 +586,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
           >
             <Globe size={14} className="text-blue-500" />
             <span className="text-[12px] font-black text-gray-700 uppercase tracking-widest">
-              {selectedTimezone === 'UTC' ? 'UTC' : 'Local Time'}
+              {selectedTimezone === 'UTC' ? 'UTC' : 'Brussels (CET)'}
             </span>
           </button>
         </div>
@@ -624,6 +637,8 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                             {!item.isAllDay && (
                               <span className="text-[18px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
                                 {item.start.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
+                                {' - '}
+                                {item.end.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                               </span>
                             )}
                             <span className={`${item.isAllDay ? 'text-[30px]' : 'text-[24px]'} font-bold leading-tight line-clamp-2 pl-1 pr-1`}>
@@ -753,15 +768,22 @@ const App: React.FC = () => {
         const mapped = data.items.map((event: any) => { 
           const isAllDay = !event.start.dateTime; 
           const startRaw = event.start.dateTime || event.start.date; 
+          const endRaw = event.end.dateTime || event.end.date;
+
+          // For all-day events, anchor to midnight in local time so Date conversion is stable
           const startDate = isAllDay ? new Date(startRaw + 'T00:00:00') : new Date(startRaw);
+          const endDate = isAllDay ? new Date(endRaw + 'T00:00:00') : new Date(endRaw);
+          
           return { 
             id: event.id, 
             start: startDate, 
-            end: new Date(event.end.dateTime || event.end.date), 
+            end: endDate, 
             title: event.summary || '(Geen titel)', 
             color: GOOGLE_COLOR_MAP[event.colorId] || '#10b981', 
             isAllDay, 
-            htmlLink: event.htmlLink 
+            htmlLink: event.htmlLink,
+            allDayStartStr: isAllDay ? startRaw : undefined, // "YYYY-MM-DD"
+            allDayEndStr: isAllDay ? endRaw : undefined     // "YYYY-MM-DD" exclusive
           }; 
         }); 
         setAgendaItems(mapped); 
