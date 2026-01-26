@@ -16,7 +16,7 @@ import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
-// Updated scopes to include the new Google Photos Picker API
+// Scopes for Picker API, Calendar, and Drive
 const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
 const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/page1';
@@ -483,37 +483,37 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   const [loading, setLoading] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
 
-  // Use the new Google Photos Picker API
   const createPickerSession = async () => {
     if (!accessToken) return;
     setLoading(true);
     try {
-      // Create a Picker Session
       const response = await fetch('https://photospicker.googleapis.com/v1/sessions', {
         method: 'POST',
         headers: { 
           'Authorization': 'Bearer ' + accessToken,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ }) // Default options
+        body: JSON.stringify({ })
       });
       const data = await response.json();
       if (data.pickerUri) {
         setIsPicking(true);
-        // Open the picker in a new tab
         const pickerWindow = window.open(data.pickerUri, '_blank');
         
-        // Poll for session completion
         const pollTimer = setInterval(async () => {
-          const checkResp = await fetch(`https://photospicker.googleapis.com/v1/sessions/${data.id}`, {
-            headers: { Authorization: 'Bearer ' + accessToken }
-          });
-          const checkData = await checkResp.json();
-          if (checkData.mediaItemsSet) {
-            clearInterval(pollTimer);
-            fetchSessionItems(data.id);
-            if (pickerWindow) pickerWindow.close();
-            setIsPicking(false);
+          try {
+            const checkResp = await fetch(`https://photospicker.googleapis.com/v1/sessions/${data.id}`, {
+              headers: { Authorization: 'Bearer ' + accessToken }
+            });
+            const checkData = await checkResp.json();
+            if (checkData.mediaItemsSet) {
+              clearInterval(pollTimer);
+              await fetchSessionItems(data.id);
+              if (pickerWindow) pickerWindow.close();
+              setIsPicking(false);
+            }
+          } catch (e) {
+            console.error("Polling error", e);
           }
         }, 3000);
       }
@@ -531,6 +531,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
       });
       const data = await response.json();
       if (data.mediaItems) {
+        // Merge with existing photos and save
         const newPhotos = [...photos, ...data.mediaItems];
         setPhotos(newPhotos);
         localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos));
@@ -543,13 +544,16 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   const clearSlideshow = () => {
     setPhotos([]);
     localStorage.removeItem(PHOTOS_CACHE_KEY);
+    setCurrentIndex(0);
   };
 
   useEffect(() => {
     if (photos.length === 0) return;
-    const interval = setInterval(() => { setCurrentIndex(prev => (prev + 1) % photos.length); }, 10000);
+    const interval = setInterval(() => {
+      setCurrentIndex(prev => (prev + 1) % photos.length);
+    }, 10000);
     return () => clearInterval(interval);
-  }, [photos]);
+  }, [photos.length]);
 
   if (loading) return (
     <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center">
@@ -578,7 +582,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         <ImageIcon size={32} className="text-gray-300" />
       </div>
       <h3 className="text-lg font-black text-gray-800 uppercase tracking-tight mb-2">Slideshow Leeg</h3>
-      <p className="text-sm text-gray-400 mb-10 max-w-xs">Gebruik de nieuwe Google Photos Picker om foto's te kiezen voor je dashboard.</p>
+      <p className="text-sm text-gray-400 mb-10 max-w-xs">Gebruik de Google Photos Picker om foto's te kiezen.</p>
       <button onClick={createPickerSession} className="px-12 py-6 bg-indigo-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-[0.2em] shadow-2xl hover:bg-indigo-700 transition-all active:scale-95 flex items-center gap-3">
         <Plus size={20} /> Foto's Kiezen
       </button>
@@ -587,11 +591,30 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
   return (
     <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden relative group">
-      {photos.map((photo, idx) => ( 
-        <div key={photo.id + idx} className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100' : 'opacity-0'}`}>
-          <img src={photo.baseUrl + '=w1920-h1080'} alt="" className="w-full h-full object-cover" />
-        </div> 
-      ))}
+      {photos.map((photo, idx) => {
+        // Picker API uses mediaFileUri or previewUri
+        const imageSource = photo.mediaFileUri || photo.previewUri;
+        return (
+          <div 
+            key={photo.id + idx} 
+            className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100' : 'opacity-0'}`}
+          >
+            {imageSource && (
+              <img 
+                src={imageSource} 
+                alt={photo.filename || ""} 
+                className="w-full h-full object-cover" 
+                onError={(e) => {
+                  console.error("Slideshow image load error", photo);
+                  // Optionally handle expired URLs by re-fetching if needed, 
+                  // but for now we just show a placeholder or keep it black.
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+      
       <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10" />
       
       {/* Control Overlay */}
