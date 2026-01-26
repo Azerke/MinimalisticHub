@@ -650,7 +650,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                           className={`w-full cursor-pointer hover:brightness-95 active:scale-[0.98] transition-all ${
                             item.isAllDay 
                               ? 'p-0.5 rounded-sm shadow-sm border border-black/5' 
-                              : 'px-0.5 py-1 bg-transparent'
+                              : 'px-0.5 py-2 bg-transparent'
                           }`}
                         >
                           <div className={`flex flex-col ${!item.isAllDay ? 'text-black' : 'text-white'}`}>
@@ -661,7 +661,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                                 {item.end.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                               </span>
                             )}
-                            <span className="text-[30px] font-bold leading-tight line-clamp-2 pl-1 pr-1">
+                            <span className="text-[30px] font-bold leading-tight line-clamp-3 pl-1 pr-1">
                               {item.title}
                             </span>
                           </div>
