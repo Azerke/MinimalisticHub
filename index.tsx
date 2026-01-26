@@ -9,13 +9,15 @@ import {
   Terminal, Sparkles, LayoutDashboard,
   Square, Trash2, Maximize, Minimize, ChevronUp, ChevronDown,
   Image as ImageIcon, ShieldAlert,
-  Mic, MicOff, AlertTriangle, ExternalLink, LogOut, Globe
+  Mic, MicOff, AlertTriangle, ExternalLink, LogOut, Globe,
+  Music, SkipBack, Play, SkipForward, Pause, Volume2
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
-const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/photoslibrary.readonly';
+// Added Drive scope to access the config file
+const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/photoslibrary.readonly https://www.googleapis.com/auth/drive.readonly';
 const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
 const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/page1';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
@@ -38,8 +40,8 @@ interface AgendaItem {
   color: string; 
   isAllDay: boolean; 
   htmlLink: string;
-  allDayStartStr?: string; // Store raw ISO date for precise comparison
-  allDayEndStr?: string;   // Store raw ISO date (exclusive)
+  allDayStartStr?: string; 
+  allDayEndStr?: string;   
 }
 
 interface WeatherData {
@@ -63,13 +65,18 @@ interface EnergyData {
   solarTotalDay: number; 
   gridTotal: number; 
   gridSetpoint: number;
-  dcPower: number; // New data point from grid.dc_power
+  dcPower: number; 
   soc: number; 
   batteryStatus: string; 
   batteryPower: number; 
   forecastPrediction: number;
   forecastSummary: string; 
   timestamp: string;
+}
+
+interface SpotifyConfig {
+  username: string;
+  password_b64: string;
 }
 
 // --- Audio Helpers ---
@@ -562,17 +569,11 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; }), []);
   
   const getEventsForDay = (date: Date) => {
-    // Current date string in the target timezone (e.g., "2023-10-23")
     const dayStr = date.toLocaleDateString('en-CA', { timeZone: selectedTimezone });
-    
     return items.filter(item => { 
       if (item.isAllDay && item.allDayStartStr && item.allDayEndStr) {
-        // Google all-day end dates are exclusive.
-        // If Oct 23 is all day: Start="2023-10-23", End="2023-10-24"
         return dayStr >= item.allDayStartStr && dayStr < item.allDayEndStr;
       }
-      
-      // For timed events, we check if the event spans any part of the requested day in the target timezone
       const startDayStr = item.start.toLocaleDateString('en-CA', { timeZone: selectedTimezone });
       const endDayStr = new Date(item.end.getTime() - 1).toLocaleDateString('en-CA', { timeZone: selectedTimezone });
       return dayStr >= startDayStr && dayStr <= endDayStr;
@@ -594,7 +595,6 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
             </button> 
           )}
         </div>
-
         <div className="absolute left-1/2 -translate-x-1/2 top-10 z-10">
           <button 
             onClick={toggleTimezone}
@@ -606,7 +606,6 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
             </span>
           </button>
         </div>
-
         <div className="flex items-center gap-8">
           <div className="text-[11px] font-black text-gray-300 uppercase tracking-[0.4em]">Komende 7 dagen</div>
           <button onClick={onToggleCollapse} className="w-12 h-12 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-400 rounded-2xl transition-all active:scale-90">
@@ -614,7 +613,6 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
           </button>
         </div>
       </div>
-
       {!isCollapsed && ( 
         <div className="flex-1 overflow-hidden mt-6 animate-in fade-in">
           {!accessToken ? ( 
@@ -640,7 +638,6 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                       </div>
                       <div className={`text-3xl font-black mt-1 ${today ? 'text-blue-600' : 'text-gray-800'}`}>{date.getDate()}</div>
                     </div>
-                    
                     <div className="flex-1 overflow-y-auto p-0 space-y-0.5 no-scrollbar">
                       {dayEvents.sort((a,b) => (a.isAllDay ? -1 : 1) - (b.isAllDay ? -1 : 1)).map(item => ( 
                         <div 
@@ -655,7 +652,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                         >
                           <div className={`flex flex-col ${!item.isAllDay ? 'text-black' : 'text-white'}`}>
                             {!item.isAllDay && (
-                              <span className="text-[24px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
+                              <span className="text-[23px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
                                 {item.start.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                                 {' - '}
                                 {item.end.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
@@ -679,9 +676,66 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   );
 };
 
-const TaskWidget = () => (
-  <div className="p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 flex-1"><span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.3em] block mb-6">Takenlijst</span><div className="space-y-4">{[{ label: 'Check Meteo Herenthout', time: '09:00' }, { label: 'Node-RED Monitor', time: '11:30' }, { label: 'Hub Onderhoud', time: '20:00' }].map((task, i) => ( <div key={i} className="flex items-center gap-4 p-4 hover:bg-gray-50 rounded-2xl transition-colors cursor-pointer group"><div className="w-8 h-8 rounded-xl border-2 border-gray-100 group-hover:border-blue-400 transition-colors" /><div className="flex-1"><div className="text-sm font-bold text-gray-700">{task.label}</div><div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{task.time}</div></div></div> ))}</div></div>
-);
+const SpotifyWidget = ({ config }: { config: SpotifyConfig | null }) => {
+  const [isPlaying, setIsPlaying] = useState(true);
+  
+  if (!config) return (
+    <div className="p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 flex-1 flex flex-col items-center justify-center text-center">
+      <div className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center mb-4">
+        <Music className="text-emerald-400" />
+      </div>
+      <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Wacht op configuratie...</p>
+    </div>
+  );
+
+  return (
+    <div className="p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 flex-1 flex flex-col transition-all hover:border-emerald-200">
+      <div className="flex justify-between items-center mb-6">
+        <span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2">
+          <Music size={10} className="text-emerald-500" /> Spotify
+        </span>
+        <div className="flex items-center gap-1.5">
+           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+           <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{config.username}</span>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+        <div className="relative group">
+           <div className="w-40 h-40 bg-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl transition-transform group-hover:scale-105 duration-500">
+             <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=400&auto=format&fit=crop" alt="Album Art" className="w-full h-full object-cover" />
+           </div>
+           <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg">
+             <Volume2 size={16} />
+           </div>
+        </div>
+
+        <div className="text-center w-full px-4">
+          <h4 className="text-xl font-black text-gray-800 tracking-tight truncate">Mockingbird</h4>
+          <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">Eminem</p>
+        </div>
+
+        <div className="w-full space-y-3 px-4">
+          <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
+            <div className="h-full bg-emerald-400 w-2/3 rounded-full" />
+          </div>
+          <div className="flex justify-between text-[10px] font-black text-gray-300 tabular-nums">
+            <span>2:34</span>
+            <span>4:11</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-10 text-gray-400">
+          <button className="hover:text-emerald-500 transition-colors"><SkipBack size={24} fill="currentColor" /></button>
+          <button onClick={() => setIsPlaying(!isPlaying)} className="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black transition-all active:scale-90 shadow-xl">
+            {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
+          </button>
+          <button className="hover:text-emerald-500 transition-colors"><SkipForward size={24} fill="currentColor" /></button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error: string | null, onClick: () => void }) => {
   return (
@@ -695,7 +749,6 @@ const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error
               <p className="text-7xl font-black text-gray-900 leading-none tracking-tighter tabular-nums">{data ? data.houseLoad : '---'}</p>
               <span className="text-2xl font-bold text-gray-300">W</span>
             </div>
-            {/* Grid data moved under House Load */}
             <div className="flex items-center gap-2 mt-4 opacity-60">
               <UtilityPole size={16} className="text-blue-400" />
               <span className="text-sm font-black text-gray-500 uppercase tracking-widest">Net: {data ? data.gridTotal + 'W' : '--W'}</span>
@@ -706,7 +759,6 @@ const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error
               <Sun size={24} className="text-amber-400" />
               <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.solarTotal + 'W' : '--W'}</span>
             </div>
-            {/* New Car icon location with grid.dc_power */}
             <div className="flex items-center gap-4">
               <Car size={24} className="text-blue-500" />
               <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.dcPower + 'W' : '--W'}</span>
@@ -758,6 +810,7 @@ const App: React.FC = () => {
   const [energyData, setEnergyData] = useState<EnergyData | null>(null);
   const [energyError, setEnergyError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [spotifyConfig, setSpotifyConfig] = useState<SpotifyConfig | null>(null);
   const tokenClientRef = useRef<any>(null);
 
   const handleLogout = () => { 
@@ -768,6 +821,7 @@ const App: React.FC = () => {
     setGrantedScopes("");
     setUser(null); 
     setAgendaItems([]); 
+    setSpotifyConfig(null);
   };
   
   const handleLogin = (isReAuth = false) => { 
@@ -796,21 +850,25 @@ const App: React.FC = () => {
                setGrantedScopes(response.scope || "");
                localStorage.setItem('hub_access_token', response.access_token); 
                localStorage.setItem('hub_granted_scopes', response.scope || "");
-               await fetchUserProfile(response.access_token); 
-               await fetchCalendarEvents(response.access_token); 
+               await refreshAllUserData(response.access_token);
             }
             setIsSyncing(false);
           },
         });
         if (accessToken) { 
-          fetchUserProfile(accessToken).catch(() => handleLogout()); 
-          fetchCalendarEvents(accessToken).catch(() => handleLogout()); 
+          refreshAllUserData(accessToken).catch(() => handleLogout()); 
         }
       } else { setTimeout(initGsi, 500); }
     };
     initGsi(); startEnergySync(); if (!weatherData) fetchWeatherForecast(false);
     return () => { clearInterval(clockTimer); document.removeEventListener('fullscreenchange', fullscreenHandler); };
   }, []);
+
+  const refreshAllUserData = async (token: string) => {
+    await fetchUserProfile(token);
+    await fetchCalendarEvents(token);
+    await fetchSpotifyConfig(token);
+  };
 
   const fetchUserProfile = async (token: string) => { 
     const resp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + token } }); if (resp.status === 401) { handleLogout(); return; }
@@ -828,11 +886,8 @@ const App: React.FC = () => {
           const isAllDay = !event.start.dateTime; 
           const startRaw = event.start.dateTime || event.start.date; 
           const endRaw = event.end.dateTime || event.end.date;
-
-          // For all-day events, anchor to midnight in local time so Date conversion is stable
           const startDate = isAllDay ? new Date(startRaw + 'T00:00:00') : new Date(startRaw);
           const endDate = isAllDay ? new Date(endRaw + 'T00:00:00') : new Date(endRaw);
-          
           return { 
             id: event.id, 
             start: startDate, 
@@ -841,13 +896,37 @@ const App: React.FC = () => {
             color: GOOGLE_COLOR_MAP[event.colorId] || '#10b981', 
             isAllDay, 
             htmlLink: event.htmlLink,
-            allDayStartStr: isAllDay ? startRaw : undefined, // "YYYY-MM-DD"
-            allDayEndStr: isAllDay ? endRaw : undefined     // "YYYY-MM-DD" exclusive
+            allDayStartStr: isAllDay ? startRaw : undefined,
+            allDayEndStr: isAllDay ? endRaw : undefined
           }; 
         }); 
         setAgendaItems(mapped); 
       }
     } catch (e) { console.error(e); } finally { setAgendaLoading(false); } 
+  };
+
+  const fetchSpotifyConfig = async (token: string) => {
+    try {
+      const searchResp = await fetch("https://www.googleapis.com/drive/v3/files?q=name='WalboFamiilyConfig.txt' and trashed=false", {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      const searchData = await searchResp.json();
+      if (searchData.files && searchData.files.length > 0) {
+        const fileId = searchData.files[0].id;
+        const fileResp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+          headers: { Authorization: 'Bearer ' + token }
+        });
+        const configData = await fileResp.json();
+        if (configData?.connections?.spotify) {
+          setSpotifyConfig({
+            username: configData.connections.spotify.username,
+            password_b64: configData.connections.spotify.password_b64
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch Spotify config from Drive", e);
+    }
   };
 
   async function fetchWeatherForecast(triggerOverlay = true) { 
@@ -880,7 +959,12 @@ const App: React.FC = () => {
       </header>
       <main className="w-full px-[50px] pt-3 pb-10 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
         <section className="xl:col-span-7 h-full">{activeMainView === 'agenda' ? ( <Calendar accessToken={accessToken} items={agendaItems} isLoading={agendaLoading} onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} isCollapsed={isAgendaCollapsed} onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} /> ) : ( <GooglePhotosWidget accessToken={accessToken} grantedScopes={grantedScopes} onForceLogout={handleLogout} onReAuth={() => handleLogin(true)} /> )}</section>
-        <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar"><EnergyWidget data={energyData} error={energyError} onClick={() => setIsEnergyOpen(true)} /><TimerWidget /><GeminiAssistantWidget /><TaskWidget /></aside>
+        <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar">
+          <EnergyWidget data={energyData} error={energyError} onClick={() => setIsEnergyOpen(true)} />
+          <TimerWidget />
+          <GeminiAssistantWidget />
+          <SpotifyWidget config={spotifyConfig} />
+        </aside>
       </main>
       {isWeatherOpen && <WeatherOverlay onClose={() => setIsWeatherOpen(false)} weatherData={weatherData} loading={weatherLoading} />}
       {isEnergyOpen && <EnergyOverlay data={energyData} onClose={() => setIsEnergyOpen(false)} />}
