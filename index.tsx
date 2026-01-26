@@ -10,19 +10,20 @@ import {
   Square, Trash2, Maximize, Minimize, ChevronUp, ChevronDown,
   Image as ImageIcon, ShieldAlert,
   Mic, MicOff, AlertTriangle, ExternalLink, LogOut, Globe,
-  Music, SkipBack, Play, SkipForward, Pause, Volume2
+  Music, SkipBack, Play, SkipForward, Pause, Volume2, Plus
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
-// Added Drive scope to access the config file
-const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/photoslibrary.readonly https://www.googleapis.com/auth/drive.readonly';
+// Updated scopes to include the new Google Photos Picker API
+const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
 const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/page1';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
 
 const WEATHER_CACHE_KEY = 'hub_weather_cache';
+const PHOTOS_CACHE_KEY = 'hub_slideshow_photos';
 const USER_CACHE_KEY = 'hub_user_profile_v3';
 
 const GOOGLE_COLOR_MAP: Record<string, string> = {
@@ -473,93 +474,143 @@ const WeatherOverlay = ({ onClose, weatherData, loading }: any) => {
   );
 };
 
-const GooglePhotosWidget = ({ accessToken, grantedScopes, onForceLogout, onReAuth }: { accessToken: string | null, grantedScopes: string, onForceLogout: () => void, onReAuth: () => void }) => {
-  const [photos, setPhotos] = useState<any[]>([]);
+const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: string | null, onForceLogout: () => void }) => {
+  const [photos, setPhotos] = useState<any[]>(() => {
+    const cached = localStorage.getItem(PHOTOS_CACHE_KEY);
+    return cached ? JSON.parse(cached) : [];
+  });
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<{status: string, message: string} | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
 
-  const fetchPhotos = async () => {
+  // Use the new Google Photos Picker API
+  const createPickerSession = async () => {
     if (!accessToken) return;
-    setLoading(true); setError(null);
+    setLoading(true);
     try {
-      const response = await fetch('https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=50', {
+      // Create a Picker Session
+      const response = await fetch('https://photospicker.googleapis.com/v1/sessions', {
+        method: 'POST',
+        headers: { 
+          'Authorization': 'Bearer ' + accessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ }) // Default options
+      });
+      const data = await response.json();
+      if (data.pickerUri) {
+        setIsPicking(true);
+        // Open the picker in a new tab
+        const pickerWindow = window.open(data.pickerUri, '_blank');
+        
+        // Poll for session completion
+        const pollTimer = setInterval(async () => {
+          const checkResp = await fetch(`https://photospicker.googleapis.com/v1/sessions/${data.id}`, {
+            headers: { Authorization: 'Bearer ' + accessToken }
+          });
+          const checkData = await checkResp.json();
+          if (checkData.mediaItemsSet) {
+            clearInterval(pollTimer);
+            fetchSessionItems(data.id);
+            if (pickerWindow) pickerWindow.close();
+            setIsPicking(false);
+          }
+        }, 3000);
+      }
+    } catch (e) {
+      console.error("Picker Session Error:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchSessionItems = async (sessionId: string) => {
+    try {
+      const response = await fetch(`https://photospicker.googleapis.com/v1/mediaItems?sessionId=${sessionId}`, {
         headers: { Authorization: 'Bearer ' + accessToken }
       });
       const data = await response.json();
-      if (data.error) {
-        setError({
-          status: data.error.status || "UNKNOWN",
-          message: data.error.message || "Onbekende fout van Google Photos API."
-        });
-      } else if (data.mediaItems && data.mediaItems.length > 0) {
-        setPhotos(data.mediaItems);
-      } else { 
-        setError({status: "EMPTY", message: "Geen foto's gevonden in je bibliotheek."}); 
+      if (data.mediaItems) {
+        const newPhotos = [...photos, ...data.mediaItems];
+        setPhotos(newPhotos);
+        localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos));
       }
-    } catch (e: any) { 
-      setError({status: "FETCH_ERROR", message: "Netwerkfout bij ophalen van foto's."}); 
+    } catch (e) {
+      console.error("Fetch Items Error:", e);
     }
-    finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchPhotos(); }, [accessToken]);
+  const clearSlideshow = () => {
+    setPhotos([]);
+    localStorage.removeItem(PHOTOS_CACHE_KEY);
+  };
+
   useEffect(() => {
     if (photos.length === 0) return;
     const interval = setInterval(() => { setCurrentIndex(prev => (prev + 1) % photos.length); }, 10000);
     return () => clearInterval(interval);
   }, [photos]);
 
-  if (loading) return ( <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center"><Loader2 className="w-12 h-12 text-blue-400 animate-spin" /><p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest">Foto's laden...</p></div> );
+  if (loading) return (
+    <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center">
+      <Loader2 className="w-12 h-12 text-blue-400 animate-spin" />
+      <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest">Sessie starten...</p>
+    </div>
+  );
 
-  if (error) return (
-    <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center text-center overflow-y-auto no-scrollbar">
-      <div className="w-20 h-20 bg-rose-50 rounded-3xl flex items-center justify-center mb-6"><ShieldAlert size={40} className="text-rose-400" /></div>
-      <h3 className="text-lg font-black text-gray-800 uppercase tracking-tight mb-2">Google Photos Toegangsfout</h3>
-      
-      <div className="w-full max-w-md bg-gray-50 p-6 rounded-3xl mb-8 border border-gray-100 text-left space-y-4">
-         <div>
-           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Fout Status:</p>
-           <p className="text-rose-600 text-sm font-bold">{error.status}</p>
-         </div>
-         <div>
-           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Gekregen Rechten (Scopes):</p>
-           <p className="text-gray-500 text-[10px] font-mono break-all leading-tight bg-white p-2 border border-gray-100 rounded-lg">
-             {grantedScopes || "Geen scopes gevonden"}
-           </p>
-           {!grantedScopes.includes("photoslibrary.readonly") && (
-             <p className="text-[10px] text-rose-500 font-bold mt-1 uppercase">⚠️ Photos scope ontbreekt!</p>
-           )}
-         </div>
-         <p className="text-gray-600 text-sm leading-relaxed">{error.message}</p>
+  if (isPicking) return (
+    <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center text-center">
+      <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
+        <ImageIcon size={40} className="text-blue-400" />
       </div>
+      <h3 className="text-xl font-black text-gray-800 uppercase tracking-tight mb-2">Foto's aan het kiezen...</h3>
+      <p className="text-sm text-gray-500 mb-8 max-w-xs">Ga naar het geopende tabblad om foto's voor je slideshow te selecteren.</p>
+      <div className="flex items-center gap-3 px-6 py-3 bg-blue-50 text-blue-600 rounded-full border border-blue-100">
+         <Loader2 size={16} className="animate-spin" />
+         <span className="text-[10px] font-black uppercase tracking-widest">Wachten op selectie</span>
+      </div>
+    </div>
+  );
 
-      <div className="flex flex-col gap-4 w-full max-w-xs">
-        <button onClick={onReAuth} className="px-8 py-5 bg-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all active:scale-95 flex items-center justify-center gap-3 shadow-xl">
-          <RefreshCw size={16} /> Re-authenticate with Full Scopes
-        </button>
-        <button onClick={onForceLogout} className="px-8 py-5 bg-gray-900 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-black transition-all active:scale-95 flex items-center justify-center gap-3">
-          <LogOut size={16} /> Log Uit
-        </button>
+  if (photos.length === 0) return (
+    <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center text-center">
+      <div className="w-20 h-20 bg-gray-50 rounded-3xl flex items-center justify-center mb-6">
+        <ImageIcon size={32} className="text-gray-300" />
       </div>
-
-      <div className="mt-10 p-6 bg-blue-50 rounded-3xl text-left border border-blue-100">
-        <p className="text-[11px] font-black text-blue-600 uppercase tracking-widest mb-2 flex items-center gap-2"><Info size={14} /> Belangrijke Tips:</p>
-        <ul className="text-[11px] text-blue-800 space-y-2 leading-relaxed list-disc ml-4">
-          <li><b>API Enabled:</b> Zorg dat de "Photos Library API" is ingeschakeld in je GCP Console.</li>
-          <li><b>Test Users:</b> Ga naar Google Cloud Console &rarr; OAuth Consent Screen en voeg je e-mail toe aan de <b>"Test Users"</b> lijst.</li>
-          <li><b>Checkbox:</b> Vink bij het inloggen expliciet het vakje <i>"View your Google Photos library"</i> aan.</li>
-        </ul>
-      </div>
+      <h3 className="text-lg font-black text-gray-800 uppercase tracking-tight mb-2">Slideshow Leeg</h3>
+      <p className="text-sm text-gray-400 mb-10 max-w-xs">Gebruik de nieuwe Google Photos Picker om foto's te kiezen voor je dashboard.</p>
+      <button onClick={createPickerSession} className="px-12 py-6 bg-indigo-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-[0.2em] shadow-2xl hover:bg-indigo-700 transition-all active:scale-95 flex items-center gap-3">
+        <Plus size={20} /> Foto's Kiezen
+      </button>
     </div>
   );
 
   return (
     <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden relative group">
-      {photos.map((photo, idx) => ( <div key={photo.id} className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100' : 'opacity-0'}`}><img src={photo.baseUrl + '=w1920-h1080'} alt="" className="w-full h-full object-cover" /></div> ))}
+      {photos.map((photo, idx) => ( 
+        <div key={photo.id + idx} className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100' : 'opacity-0'}`}>
+          <img src={photo.baseUrl + '=w1920-h1080'} alt="" className="w-full h-full object-cover" />
+        </div> 
+      ))}
       <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10" />
-      <div className="absolute bottom-10 left-10 text-white flex flex-col gap-1"><span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">Google Photos</span><span className="text-xs font-bold truncate max-w-sm">{photos[currentIndex]?.filename}</span></div>
-      <div className="absolute top-10 right-10 flex gap-4"><button onClick={fetchPhotos} className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-white hover:bg-white/40 transition-colors"><RefreshCw size={18} /></button><div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-white"><ImageIcon size={20} /></div></div>
+      
+      {/* Control Overlay */}
+      <div className="absolute top-10 right-10 flex gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={createPickerSession} className="h-14 px-6 bg-white/20 backdrop-blur-md rounded-2xl flex items-center gap-3 text-white hover:bg-white/40 transition-colors">
+          <Plus size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Toevoegen</span>
+        </button>
+        <button onClick={clearSlideshow} title="Slideshow wissen" className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-rose-400 hover:bg-white/40 transition-colors">
+          <Trash2 size={18} />
+        </button>
+        <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-white">
+          <ImageIcon size={20} />
+        </div>
+      </div>
+
+      <div className="absolute bottom-10 left-10 text-white flex flex-col gap-1">
+        <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">Slideshow • {photos.length} Foto's</span>
+        <span className="text-xs font-bold truncate max-w-sm">{photos[currentIndex]?.filename}</span>
+      </div>
     </div>
   );
 };
@@ -958,7 +1009,13 @@ const App: React.FC = () => {
         </div>
       </header>
       <main className="w-full px-[50px] pt-3 pb-10 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
-        <section className="xl:col-span-7 h-full">{activeMainView === 'agenda' ? ( <Calendar accessToken={accessToken} items={agendaItems} isLoading={agendaLoading} onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} isCollapsed={isAgendaCollapsed} onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} /> ) : ( <GooglePhotosWidget accessToken={accessToken} grantedScopes={grantedScopes} onForceLogout={handleLogout} onReAuth={() => handleLogin(true)} /> )}</section>
+        <section className="xl:col-span-7 h-full">
+          {activeMainView === 'agenda' ? ( 
+            <Calendar accessToken={accessToken} items={agendaItems} isLoading={agendaLoading} onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} isCollapsed={isAgendaCollapsed} onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} /> 
+          ) : ( 
+            <GooglePhotosWidget accessToken={accessToken} onForceLogout={handleLogout} /> 
+          )}
+        </section>
         <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar">
           <EnergyWidget data={energyData} error={energyError} onClick={() => setIsEnergyOpen(true)} />
           <TimerWidget />
