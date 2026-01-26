@@ -49,11 +49,27 @@ interface WeatherData {
 }
 
 interface EnergyData {
-  houseLoad: number; evPower: number; evChargedToday: number; evChargedMonth: number; evTotalCounter: number;
-  evStatus: string; solarTotal: number; solarAC: number; solarDC: number; solarDCDay: number;
-  solarACDay: number; solarTotalDay: number; gridTotal: number; gridSetpoint: number;
-  soc: number; batteryStatus: string; batteryPower: number; forecastPrediction: number;
-  forecastSummary: string; timestamp: string;
+  houseLoad: number; 
+  evPower: number; 
+  evChargedToday: number; 
+  evChargedMonth: number; 
+  evTotalCounter: number;
+  evStatus: string; 
+  solarTotal: number; 
+  solarAC: number; 
+  solarDC: number; 
+  solarDCDay: number;
+  solarACDay: number; 
+  solarTotalDay: number; 
+  gridTotal: number; 
+  gridSetpoint: number;
+  dcPower: number; // New data point from grid.dc_power
+  soc: number; 
+  batteryStatus: string; 
+  batteryPower: number; 
+  forecastPrediction: number;
+  forecastSummary: string; 
+  timestamp: string;
 }
 
 // --- Audio Helpers ---
@@ -631,17 +647,21 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                           key={item.id + date.toISOString()} 
                           onClick={() => window.open(item.htmlLink, '_blank')} 
                           style={item.isAllDay ? { backgroundColor: item.color || '#9ca3af' } : {}} 
-                          className={`w-full p-0.5 cursor-pointer hover:brightness-95 active:scale-[0.98] transition-all ${item.isAllDay ? 'rounded-sm shadow-sm border border-black/5' : 'bg-transparent'}`}
+                          className={`w-full cursor-pointer hover:brightness-95 active:scale-[0.98] transition-all ${
+                            item.isAllDay 
+                              ? 'p-0.5 rounded-sm shadow-sm border border-black/5' 
+                              : 'px-0.5 py-1 bg-transparent'
+                          }`}
                         >
                           <div className={`flex flex-col ${!item.isAllDay ? 'text-black' : 'text-white'}`}>
                             {!item.isAllDay && (
-                              <span className="text-[18px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
+                              <span className="text-[24px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
                                 {item.start.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                                 {' - '}
                                 {item.end.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                               </span>
                             )}
-                            <span className={`${item.isAllDay ? 'text-[30px]' : 'text-[24px]'} font-bold leading-tight line-clamp-2 pl-1 pr-1`}>
+                            <span className="text-[30px] font-bold leading-tight line-clamp-2 pl-1 pr-1">
                               {item.title}
                             </span>
                           </div>
@@ -664,20 +684,59 @@ const TaskWidget = () => (
 );
 
 const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error: string | null, onClick: () => void }) => {
-  const evDisplay = useMemo(() => { 
-    if (!data) return '--'; 
-    const isIdle = data.evStatus.toLowerCase().includes('idle') || data.evPower < 10;
-    return isIdle ? 'Idle' : data.evPower + 'W'; 
-  }, [data]);
-  
-  const isEvIdle = !data || data.evStatus.toLowerCase().includes('idle') || data.evPower < 10;
-  const evIconClass = isEvIdle ? "text-gray-200" : "text-blue-500";
-  const evTextClass = isEvIdle ? "text-gray-400" : "text-gray-900";
-
   return (
     <button onClick={onClick} className="w-full p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 text-left hover:border-emerald-400 hover:shadow-xl transition-all active:scale-[0.98] overflow-hidden">
       <div className="flex justify-between items-center mb-6"><span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2"><Zap size={10} className="text-emerald-500" /> Energie Status</span>{error ? (<span className="text-[9px] font-black text-rose-500 uppercase flex items-center gap-1"><AlertTriangle size={10}/> {error}</span>) : (<span className="text-[9px] font-black text-emerald-500 uppercase flex items-center gap-1"><CheckCircle2 size={10}/> LIVE</span>)}</div>
-      <div className="space-y-8"><div className="flex items-center justify-between gap-6"><div className="flex-1"><p className="text-[12px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Huis Verbruik</p><div className="flex items-baseline gap-2"><p className="text-7xl font-black text-gray-900 leading-none tracking-tighter tabular-nums">{data ? data.houseLoad : '---'}</p><span className="text-2xl font-bold text-gray-300">W</span></div></div><div className="space-y-5 border-l border-gray-100 pl-8"><div className="flex items-center gap-4"><Sun size={24} className="text-amber-400" /><span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.solarTotal + 'W' : '--W'}</span></div><div className="flex items-center gap-4"><UtilityPole size={24} className="text-blue-400" /><span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.gridTotal + 'W' : '--W'}</span></div><div className="flex items-center gap-4"><BatteryIcon size={24} className="text-emerald-500" /><div className="flex items-center gap-2"><span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.batteryPower + 'W' : '--W'}</span></div></div></div></div><div className="grid grid-cols-2 gap-4 border-t border-gray-50 pt-8"><div className="flex flex-col gap-2"><span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Batterij</span><div className="flex items-center gap-3"><div className="w-2.5 h-5 border-2 border-emerald-400 rounded-[2px] relative flex items-end"><div className="w-full bg-emerald-400" style={{ height: (data?.soc || 0) + '%' }} /></div><span className="text-2xl font-black text-gray-900 tabular-nums">{data ? data.soc + '%' : '--%'}</span></div></div><div className="flex flex-col gap-2 text-right"><span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">EV Lader</span><div className="flex items-center justify-end gap-4"><Car size={28} className={evIconClass} /><span className={'text-2xl font-black tabular-nums ' + evTextClass}>{evDisplay}</span></div></div></div></div>
+      <div className="space-y-8">
+        <div className="flex items-center justify-between gap-6">
+          <div className="flex-1">
+            <p className="text-[12px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Huis Verbruik</p>
+            <div className="flex items-baseline gap-2">
+              <p className="text-7xl font-black text-gray-900 leading-none tracking-tighter tabular-nums">{data ? data.houseLoad : '---'}</p>
+              <span className="text-2xl font-bold text-gray-300">W</span>
+            </div>
+            {/* Grid data moved under House Load */}
+            <div className="flex items-center gap-2 mt-4 opacity-60">
+              <UtilityPole size={16} className="text-blue-400" />
+              <span className="text-sm font-black text-gray-500 uppercase tracking-widest">Net: {data ? data.gridTotal + 'W' : '--W'}</span>
+            </div>
+          </div>
+          <div className="space-y-5 border-l border-gray-100 pl-8">
+            <div className="flex items-center gap-4">
+              <Sun size={24} className="text-amber-400" />
+              <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.solarTotal + 'W' : '--W'}</span>
+            </div>
+            {/* New Car icon location with grid.dc_power */}
+            <div className="flex items-center gap-4">
+              <Car size={24} className="text-blue-500" />
+              <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.dcPower + 'W' : '--W'}</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <BatteryIcon size={24} className="text-emerald-500" />
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.batteryPower + 'W' : '--W'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4 border-t border-gray-50 pt-8">
+          <div className="flex flex-col gap-2">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Batterij</span>
+            <div className="flex items-center gap-3">
+              <div className="w-2.5 h-5 border-2 border-emerald-400 rounded-[2px] relative flex items-end">
+                <div className="w-full bg-emerald-400" style={{ height: (data?.soc || 0) + '%' }} />
+              </div>
+              <span className="text-2xl font-black text-gray-900 tabular-nums">{data ? data.soc + '%' : '--%'}</span>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 text-right">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Zon Forecast</span>
+            <div className="flex items-center justify-end gap-2">
+              <span className={'text-2xl font-black tabular-nums text-gray-900'}>{data ? Math.round(data.forecastPrediction) + ' kWh' : '--'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </button>
   );
 };
@@ -800,7 +859,7 @@ const App: React.FC = () => {
       localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(newWeatherData));
     } catch (e) { console.error(e); } finally { setWeatherLoading(false); } 
   }
-  const startEnergySync = () => { setInterval(async () => { try { const resp = await fetch(ENERGY_ENDPOINT); const data = await resp.json(); setEnergyData({ houseLoad: data.grid?.ac_power?.value || 0, evPower: data.ev?.current_power?.value || 0, evChargedToday: data.ev?.charged_today?.value || 0, evChargedMonth: data.ev?.charged_month?.value || 0, evTotalCounter: data.ev?.total_counter?.value || 0, evStatus: data.ev?.status?.value || 'Idle', solarTotal: data.solar?.total_power?.value || 0, solarAC: data.solar?.ac_power?.value || 0, solarDC: data.solar?.dc_power?.value || 0, solarDCDay: data.solar?.dc_pv_total?.value || 0, solarACDay: data.solar?.ac_pv_totalday?.value || 0, solarTotalDay: data.solar?.total_powerday?.value || 0, gridTotal: data.grid?.total_power?.value || 0, gridSetpoint: data.grid?.setpoint?.value || 0, soc: data.battery?.soc?.value || 0, batteryStatus: data.battery?.status?.value || 'Idle', batteryPower: data.battery?.power?.value || 0, forecastPrediction: parseFloat(data.forecast?.prediction?.value || "0"), forecastSummary: data.forecast?.summary?.value || 'Laden...', timestamp: new Date().toISOString() }); setEnergyError(null); } catch (e) { setEnergyError("Geen verbinding"); } }, 2000); };
+  const startEnergySync = () => { setInterval(async () => { try { const resp = await fetch(ENERGY_ENDPOINT); const data = await resp.json(); setEnergyData({ houseLoad: data.grid?.ac_power?.value || 0, evPower: data.ev?.current_power?.value || 0, evChargedToday: data.ev?.charged_today?.value || 0, evChargedMonth: data.ev?.charged_month?.value || 0, evTotalCounter: data.ev?.total_counter?.value || 0, evStatus: data.ev?.status?.value || 'Idle', solarTotal: data.solar?.total_power?.value || 0, solarAC: data.solar?.ac_pv_power?.value || 0, solarDC: data.solar?.dc_pv_power?.value || 0, solarDCDay: data.solar?.dc_pv_total?.value || 0, solarACDay: data.solar?.ac_pv_totalday?.value || 0, solarTotalDay: data.solar?.total_powerday?.value || 0, gridTotal: data.grid?.total_power?.value || 0, gridSetpoint: data.grid?.setpoint?.value || 0, dcPower: data.grid?.dc_power?.value || 0, soc: data.battery?.soc?.value || 0, batteryStatus: data.battery?.status?.value || 'Idle', batteryPower: data.battery?.power?.value || 0, forecastPrediction: parseFloat(data.forecast?.prediction?.value || "0"), forecastSummary: data.forecast?.summary?.value || 'Laden...', timestamp: new Date().toISOString() }); setEnergyError(null); } catch (e) { setEnergyError("Geen verbinding"); } }, 2000); };
 
   return (
     <div className="min-h-screen w-full bg-[#fcfcfc] flex flex-col animate-in fade-in">
