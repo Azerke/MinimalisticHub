@@ -37,7 +37,7 @@ interface AgendaItem {
   end: Date; 
   title: string; 
   location: string;
-  category: 'work' | 'personal' | 'health' | 'social'; 
+  category: 'word' | 'personal' | 'health' | 'social'; 
   color: string; 
   isAllDay: boolean; 
   htmlLink: string;
@@ -364,7 +364,7 @@ const EnergyOverlay = ({ data, onClose }: { data: EnergyData | null, onClose: ()
       <div className="absolute inset-0 bg-white/60 backdrop-blur-[100px]" onClick={onClose} />
       <div className="relative w-full h-full bg-white/40 shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="p-8 flex justify-between items-center bg-white/20 backdrop-blur-xl shrink-0 border-b border-white/40">
-          <div className="flex items-center gap-8"><button onClick={() => setShowNodeRed(true)} className="w-16 h-16 bg-emerald-500 rounded-3xl flex items-center justify-center shadow-lg border border-emerald-400 text-white hover:scale-105 transition-transform active:scale-95"><Zap size={32} fill="currentColor" /></button><div><h3 className="text-3xl font-black text-gray-900 tracking-tight">Energie Monitor</h3><div className="flex items-center gap-3 mt-1"><a href={VICTRON_VRM_URL} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-500 font-bold uppercase hover:underline flex items-center gap-1.5">Victron VRM <ExternalLink size={10} /></a><div className="w-1 h-1 bg-gray-200 rounded-full" /><span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Node-RED Stream</span></div></div></div>
+          <div className="flex items-center gap-8"><button onClick={() => setShowNodeRed(true)} className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center shadow-lg border border-emerald-400 text-white hover:scale-105 transition-transform active:scale-95"><Zap size={32} fill="currentColor" /></button><div><h3 className="text-3xl font-black text-gray-900 tracking-tight">Energie Monitor</h3><div className="flex items-center gap-3 mt-1"><a href={VICTRON_VRM_URL} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-500 font-bold uppercase hover:underline flex items-center gap-1.5">Victron VRM <ExternalLink size={10} /></a><div className="w-1 h-1 bg-gray-200 rounded-full" /><span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Node-RED Stream</span></div></div></div>
           <button onClick={onClose} className="w-16 h-16 flex items-center justify-center bg-gray-900 hover:bg-black rounded-[2rem] transition-all text-white shadow-2xl active:scale-90 group"><X className="w-8 h-8 group-hover:rotate-90 transition-transform" /></button>
         </div>
         {showNodeRed && ( <div className="absolute inset-0 z-[300] bg-[#f0f0f0] flex flex-col animate-in slide-in-from-bottom-8"><div className="p-6 flex justify-between items-center bg-white border-b border-gray-200"><div className="flex items-center gap-4"><LayoutDashboard className="text-emerald-500" /><span className="font-black text-sm uppercase tracking-widest">Node-RED Full Control</span></div><button onClick={() => setShowNodeRed(false)} className="px-6 py-2 bg-gray-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Sluiten</button></div><iframe src={NODERED_DASHBOARD} className="flex-1 w-full border-none" /></div> )}
@@ -531,7 +531,6 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
       });
       const data = await response.json();
       if (data.mediaItems) {
-        // Merge with existing photos and save
         const newPhotos = [...photos, ...data.mediaItems];
         setPhotos(newPhotos);
         localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos));
@@ -592,7 +591,6 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   return (
     <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden relative group">
       {photos.map((photo, idx) => {
-        // Picker API uses mediaFileUri or previewUri
         const imageSource = photo.mediaFileUri || photo.previewUri;
         return (
           <div 
@@ -606,8 +604,6 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
                 className="w-full h-full object-cover" 
                 onError={(e) => {
                   console.error("Slideshow image load error", photo);
-                  // Optionally handle expired URLs by re-fetching if needed, 
-                  // but for now we just show a placeholder or keep it black.
                 }}
               />
             )}
@@ -617,7 +613,6 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
       
       <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10" />
       
-      {/* Control Overlay */}
       <div className="absolute top-10 right-10 flex gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={createPickerSession} className="h-14 px-6 bg-white/20 backdrop-blur-md rounded-2xl flex items-center gap-3 text-white hover:bg-white/40 transition-colors">
           <Plus size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Toevoegen</span>
@@ -812,40 +807,62 @@ const SpotifyWidget = ({ config }: { config: SpotifyConfig | null }) => {
 };
 
 const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error: string | null, onClick: () => void }) => {
+  const isEvCharging = data && data.evPower > 100;
+  const isDcLoading = data && data.dcPower > 100;
+  const batteryStatus = data ? data.batteryStatus : '';
+  
+  // Kleur op basis van batteryStatus: Opladen = emerald, Ontladen = rose, anders grijs
+  const batteryIconColor = batteryStatus.toLowerCase() === 'opladen' ? "text-emerald-500" : 
+                          batteryStatus.toLowerCase() === 'ontladen' ? "text-rose-500" : "text-gray-400";
+  
   return (
     <button onClick={onClick} className="w-full p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 text-left hover:border-emerald-400 hover:shadow-xl transition-all active:scale-[0.98] overflow-hidden">
       <div className="flex justify-between items-center mb-6"><span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2"><Zap size={10} className="text-emerald-500" /> Energie Status</span>{error ? (<span className="text-[9px] font-black text-rose-500 uppercase flex items-center gap-1"><AlertTriangle size={10}/> {error}</span>) : (<span className="text-[9px] font-black text-emerald-500 uppercase flex items-center gap-1"><CheckCircle2 size={10}/> LIVE</span>)}</div>
       <div className="space-y-8">
-        <div className="flex items-center justify-between gap-6">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex-1">
             <p className="text-[12px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Huis Verbruik</p>
             <div className="flex items-baseline gap-2">
               <p className="text-7xl font-black text-gray-900 leading-none tracking-tighter tabular-nums">{data ? data.houseLoad : '---'}</p>
               <span className="text-2xl font-bold text-gray-300">W</span>
             </div>
-            <div className="flex items-center gap-2 mt-4 opacity-60">
-              <UtilityPole size={16} className="text-blue-400" />
-              <span className="text-sm font-black text-gray-500 uppercase tracking-widest">Net: {data ? data.gridTotal + 'W' : '--W'}</span>
+            <div className="flex items-center gap-2 mt-4">
+              <UtilityPole size={16} className="text-blue-500" />
+              <span className="text-sm font-black text-gray-900 uppercase tracking-widest">Net: {data ? data.gridTotal + 'W' : '--W'}</span>
             </div>
           </div>
-          <div className="space-y-5 border-l border-gray-100 pl-8">
+          <div className="space-y-5 border-l border-gray-100 pl-4">
             <div className="flex items-center gap-4">
               <Sun size={24} className="text-amber-400" />
               <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.solarTotal + 'W' : '--W'}</span>
             </div>
             <div className="flex items-center gap-4">
-              <Car size={24} className="text-blue-500" />
-              <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.dcPower + 'W' : '--W'}</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <BatteryIcon size={24} className="text-emerald-500" />
+              <BatteryIcon size={24} className={batteryIconColor} />
               <div className="flex items-center gap-2">
                 <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.batteryPower + 'W' : '--W'}</span>
               </div>
             </div>
+            <div className="flex items-center gap-4">
+              {isDcLoading ? (
+                <>
+                  <Zap size={24} className="text-emerald-500" />
+                  <span className="text-2xl font-black text-gray-800 tabular-nums">{data.dcPower}W</span>
+                </>
+              ) : isEvCharging ? (
+                <>
+                  <Car size={24} className="text-blue-500" />
+                  <span className="text-2xl font-black text-gray-800 tabular-nums">{data.evPower}W</span>
+                </>
+              ) : (
+                <>
+                  <Car size={24} className="text-gray-400" />
+                  <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Idle</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4 border-t border-gray-50 pt-8">
+        <div className="grid grid-cols-3 gap-4 border-t border-gray-50 pt-8">
           <div className="flex flex-col gap-2">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Batterij</span>
             <div className="flex items-center gap-3">
@@ -855,7 +872,8 @@ const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error
               <span className="text-2xl font-black text-gray-900 tabular-nums">{data ? data.soc + '%' : '--%'}</span>
             </div>
           </div>
-          <div className="flex flex-col gap-2 text-right">
+          <div />
+          <div className="flex flex-col gap-2 text-right items-end">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Zon Forecast</span>
             <div className="flex items-center justify-end gap-2">
               <span className={'text-2xl font-black tabular-nums text-gray-900'}>{data ? Math.round(data.forecastPrediction) + ' kWh' : '--'}</span>
@@ -962,11 +980,22 @@ const App: React.FC = () => {
           const endRaw = event.end.dateTime || event.end.date;
           const startDate = isAllDay ? new Date(startRaw + 'T00:00:00') : new Date(startRaw);
           const endDate = isAllDay ? new Date(endRaw + 'T00:00:00') : new Date(endRaw);
+          
+          let displayTitle = event.summary || '(Geen titel)';
+          if (!isAllDay) {
+            // Regex om redundante tijdaanduidingen zoals "12u30-16u30", "14u", "14:00", etc. uit de titel te verwijderen
+            displayTitle = displayTitle
+              .replace(/\s*\d{1,2}[u:]\d{0,2}\s*-\s*\d{1,2}[u:]\d{0,2}/gi, '')
+              .replace(/\s*\d{1,2}[u:]\d{2}/gi, '')
+              .replace(/\s*\d{1,2}\s*u/gi, '')
+              .trim();
+          }
+
           return { 
             id: event.id, 
             start: startDate, 
             end: endDate, 
-            title: event.summary || '(Geen titel)', 
+            title: displayTitle, 
             color: GOOGLE_COLOR_MAP[event.colorId] || '#10b981', 
             isAllDay, 
             htmlLink: event.htmlLink,
