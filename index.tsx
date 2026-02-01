@@ -10,14 +10,15 @@ import {
   Square, Trash2, Maximize, Minimize, ChevronUp, ChevronDown,
   Image as ImageIcon, ShieldAlert,
   Mic, MicOff, AlertTriangle, ExternalLink, LogOut, Globe,
-  Music, SkipBack, Play, SkipForward, Pause, Volume2, Plus
+  Music, SkipBack, Play, SkipForward, Pause, Volume2, Plus, Settings, Key,
+  TrendingUp, Activity, History, Save,
+  Recycle, Package, FileText, ChevronRight
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
-// Scopes for Picker API, Calendar, and Drive
-const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
+const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
 const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/page1';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
@@ -52,32 +53,53 @@ interface WeatherData {
 }
 
 interface EnergyData {
-  houseLoad: number; 
-  evPower: number; 
-  evChargedToday: number; 
-  evChargedMonth: number; 
-  evTotalCounter: number;
-  evStatus: string; 
-  solarTotal: number; 
-  solarAC: number; 
-  solarDC: number; 
-  solarDCDay: number;
-  solarACDay: number; 
-  solarTotalDay: number; 
-  gridTotal: number; 
-  gridSetpoint: number;
-  dcPower: number; 
-  soc: number; 
-  batteryStatus: string; 
-  batteryPower: number; 
-  forecastPrediction: number;
-  forecastSummary: string; 
-  timestamp: string;
+  ev: {
+    power: number;
+    chargedToday: number;
+    chargedMonth: number;
+    totalCounter: number;
+    startDay: string;
+    startMonth: string;
+    status: string;
+  };
+  solar: {
+    total: number;
+    ac: number;
+    dc: number;
+    dcTotalDay: number;
+    acTotalDay: number;
+    totalDay: number;
+  };
+  grid: {
+    total: number;
+    setpoint: number;
+    acPower: number;
+    dcPower: number;
+  };
+  battery: {
+    soc: number;
+    status: string;
+    power: number;
+  };
+  forecast: {
+    prediction: number;
+    summary: string;
+  };
+  meta: {
+    timestamp: string;
+    system: string;
+  };
 }
 
 interface SpotifyConfig {
   username: string;
   password_b64: string;
+}
+
+interface LogEntry {
+  timestamp: string;
+  msg: string;
+  type: 'info' | 'error' | 'success';
 }
 
 // --- Audio Helpers ---
@@ -106,7 +128,7 @@ function createPCMUnit8Array(data: Float32Array): Uint8Array {
   return new Uint8Array(int16.buffer);
 }
 
-const getWeatherInfo = (code: number): { icon: 'sun' | 'cloud' | 'rain' | 'storm' | 'snow' | 'drizzle', text: string } => {
+const getWeatherInfo = (code: number): { icon: 'sun' | 'cloud' | 'rain' | 'storm' | 'snow' | 'drizzle'; text: string } => {
   if (code === 0) return { icon: 'sun', text: 'Zonnig' };
   if (code === 1) return { icon: 'sun', text: 'Helder' };
   if (code === 2) return { icon: 'cloud', text: 'Licht bewolkt' };
@@ -121,13 +143,13 @@ const getWeatherInfo = (code: number): { icon: 'sun' | 'cloud' | 'rain' | 'storm
   return { icon: 'cloud', text: 'Bewolkt' };
 };
 
-const VisualBattery = ({ soc, status }: { soc: number, status: string }) => {
+const VisualBattery = ({ soc, status, className }: { soc: number; status: string; className?: string }) => {
   const isCharging = status.toLowerCase() === 'opladen';
   const fillColor = isCharging ? 'bg-emerald-500' : 'bg-orange-500';
   const displaySoc = soc + '%';
   const barHeight = soc + '%';
   return (
-    <div className="relative w-40 h-64 border-4 border-gray-800 rounded-[1.5rem] p-1.5 flex items-end">
+    <div className={`relative w-40 h-64 border-4 border-gray-800 rounded-[1.5rem] p-1.5 flex items-end ${className}`}>
       <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-12 h-4 bg-gray-800 rounded-t-lg" />
       <div className={`w-full rounded-2xl transition-all duration-1000 ${fillColor}`} style={{ height: barHeight }} />
       <div className="absolute inset-0 flex items-center justify-center"><span className="text-4xl font-black text-gray-900 drop-shadow-sm">{displaySoc}</span></div>
@@ -141,8 +163,9 @@ const GeminiAssistantWidget = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [needsKey, setNeedsKey] = useState(false);
-  const [logs, setLogs] = useState<{timestamp: string, msg: string, type: 'info' | 'error' | 'success'}[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const nextStartTimeRef = useRef(0);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
@@ -161,7 +184,11 @@ const GeminiAssistantWidget = () => {
     sessionActiveRef.current = false; setIsActive(false); setIsSpeaking(false); setIsStarting(false);
     if (reason && reason !== "Sessie gesloten.") {
       const isAuthError = reason.includes("API key not valid") || reason.includes("Requested entity was not found") || reason.includes("403") || reason.includes("401");
-      if (isAuthError) { addLog("Authenticatie fout gedetecteerd.", 'error'); setNeedsKey(true); setErrorMsg("API Key ongeldig of niet gekoppeld."); }
+      if (isAuthError) { 
+        addLog("Authenticatie fout gedetecteerd.", 'error'); 
+        setNeedsKey(true); 
+        setErrorMsg("API Key ongeldig of niet gekoppeld. Gebruik een key van een betaald project."); 
+      }
       else { setErrorMsg(reason); }
     }
     sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} }); sourcesRef.current.clear();
@@ -173,7 +200,12 @@ const GeminiAssistantWidget = () => {
 
   const handleKeySetup = async () => {
     if ((window as any).aistudio) {
-      await (window as any).aistudio.openSelectKey(); setErrorMsg(null); setNeedsKey(false);
+      addLog("Google AI Studio Key Selector openen...", 'info');
+      await (window as any).aistudio.openSelectKey(); 
+      setErrorMsg(null); 
+      setNeedsKey(false);
+      setShowSettings(false);
+      addLog("Key geselecteerd. Startpoging in 500ms...", 'info');
       setTimeout(startSession, 500);
     }
   };
@@ -183,9 +215,15 @@ const GeminiAssistantWidget = () => {
     setIsStarting(true); setErrorMsg(null); setNeedsKey(false);
     if ((window as any).aistudio) {
       const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-      if (!hasKey && !process.env.API_KEY) { setNeedsKey(true); setErrorMsg("Koppel een betaalde API Key om te starten."); setIsStarting(false); return; }
+      if (!hasKey && !process.env.API_KEY) { 
+        setNeedsKey(true); 
+        setErrorMsg("Koppel een betaalde API Key om te starten."); 
+        setIsStarting(false); 
+        return; 
+      }
     }
     try {
+      addLog("Live sessie initialiseren...", 'info');
       const inCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const outCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       if (inCtx.state === 'suspended') await inCtx.resume();
@@ -197,6 +235,7 @@ const GeminiAssistantWidget = () => {
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
+            addLog("Live sessie verbonden met Google AI Cloud.", 'success');
             sessionActiveRef.current = true; setIsActive(true); setIsStarting(false);
             const source = inCtx.createMediaStreamSource(stream);
             const scriptProcessor = inCtx.createScriptProcessor(4096, 1, 1);
@@ -204,7 +243,11 @@ const GeminiAssistantWidget = () => {
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const pcmBytes = createPCMUnit8Array(inputData);
-              sessionPromise.then((session) => { session.sendRealtimeInput({ media: { data: encode(pcmBytes), mimeType: 'audio/pcm;rate=16000' } }); });
+              sessionPromise.then((session) => { 
+                if (sessionActiveRef.current) {
+                  session.sendRealtimeInput({ media: { data: encode(pcmBytes), mimeType: 'audio/pcm;rate=16000' } }); 
+                }
+              });
             };
             source.connect(scriptProcessor); scriptProcessor.connect(inCtx.destination);
           },
@@ -234,36 +277,78 @@ const GeminiAssistantWidget = () => {
     } catch (err: any) { stopSession(err.message || "Kon Live sessie niet starten."); }
   };
 
-  const copyLogs = () => {
-    const text = logs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n');
-    navigator.clipboard.writeText(text); addLog("Logs gekopieerd naar klembord.", 'success');
-  };
-
   return (
     <>
       <div className={`p-8 rounded-[2.5rem] shadow-sm border transition-all duration-500 overflow-hidden relative ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100'}`}>
         <div className="flex justify-between items-center mb-6">
-          <button onClick={() => setShowLogs(true)} className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-indigo-400 transition-colors">
-            <span className={`w-2 h-2 rounded-full ${(isActive || isStarting) ? 'bg-indigo-500 animate-pulse' : 'bg-gray-300'}`} /> Gemini Hub Live
-          </button>
+          <div className="flex items-center gap-4">
+            <button onClick={() => setShowLogs(true)} className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-indigo-400 transition-colors">
+              <span className={`w-2 h-2 rounded-full ${(isActive || isStarting) ? 'bg-indigo-500 animate-pulse' : 'bg-gray-300'}`} /> Gemini Hub Live
+            </button>
+            <button onClick={() => setShowSettings(true)} className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-400 rounded-xl hover:text-indigo-500 transition-colors">
+              <Settings size={14} />
+            </button>
+          </div>
           <button onClick={isActive ? () => stopSession() : startSession} disabled={isStarting} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all active:scale-90 ${(isActive || isStarting) ? 'bg-indigo-500 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>
             {isStarting ? <Loader2 size={20} className="animate-spin" /> : isActive ? <MicOff size={20} /> : <Mic size={20} />}
           </button>
         </div>
         <div className="space-y-4">
           {errorMsg ? (
-            <div className="py-2"><div className="flex items-center gap-3 text-rose-500 mb-3"><AlertTriangle size={16} /><p className="text-[11px] font-bold leading-tight">{errorMsg}</p></div>{needsKey && (<button onClick={handleKeySetup} className="w-full py-3 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest border border-rose-100 hover:bg-rose-100 transition-colors shadow-sm">Koppel API Key</button>)}</div>
+            <div className="py-2"><div className="flex items-center gap-3 text-rose-500 mb-3"><AlertTriangle size={16} /><p className="text-[11px] font-bold leading-tight">{errorMsg}</p></div>{needsKey && (<button onClick={() => setShowSettings(true)} className="w-full py-3 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest border border-rose-100 hover:bg-rose-100 transition-colors shadow-sm">Instellingen openen</button>)}</div>
           ) : isActive ? (
             <div className="py-4"><div className="flex items-center gap-2 mb-2"><div className={`flex items-end gap-1 h-6 ${isSpeaking ? 'animate-pulse' : ''}`}>{[1, 2, 3, 4, 5].map(i => (<div key={i} className={`w-1 bg-indigo-400 rounded-full transition-all duration-300 ${isSpeaking ? 'h-full' : 'h-2'}`} style={{animationDelay: `${i * 0.1}s`}} />))}</div><span className="text-xs font-black text-indigo-600 uppercase tracking-widest">{isSpeaking ? 'Hub spreekt...' : 'Hub luistert...'}</span></div></div>
           ) : isStarting ? ( <p className="text-sm font-medium text-indigo-400 leading-relaxed animate-pulse">Initialiseren...</p> ) : (<p className="text-sm font-medium text-gray-500 leading-relaxed">Activeer de assistent voor een live gesprek.</p>)}
         </div>
       </div>
+
       {showLogs && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center animate-in fade-in bg-black/80 backdrop-blur-md p-10">
           <div className="bg-[#1a1a1a] w-full max-w-4xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
-            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center"><div className="flex items-center gap-4 text-indigo-400"><Terminal size={24} /><h3 className="font-black text-xs uppercase tracking-[0.4em]">Gemini Live Console Logs</h3></div><div className="flex items-center gap-4"><button onClick={copyLogs} className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"><Copy size={18} /></button><button onClick={() => setLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all"><Trash2 size={18} /></button><button onClick={() => setShowLogs(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all"><X size={24} /></button></div></div>
+            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center"><div className="flex items-center gap-4 text-indigo-400"><Terminal size={24} /><h3 className="font-black text-xs uppercase tracking-[0.4em]">Gemini Hub Live Console Logs</h3></div><div className="flex items-center gap-4"><button onClick={() => { const text = logs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"><Copy size={18} /></button><button onClick={() => setLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all"><Trash2 size={18} /></button><button onClick={() => setShowLogs(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all"><X size={24} /></button></div></div>
             <div className="flex-1 overflow-y-auto p-8 space-y-2 font-mono text-[11px] scroll-smooth no-scrollbar">
-              {logs.length === 0 ? ( <div className="h-full flex items-center justify-center opacity-20 text-white font-black uppercase tracking-widest">Geen logs beschikbaar</div> ) : logs.map((log, i) => ( <div key={i} className={`flex gap-4 border-b border-white/5 pb-2 last:border-0 ${log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}`}><span className="opacity-40 whitespace-nowrap">[{log.timestamp}]</span><span className="font-bold whitespace-nowrap">[{log.type.toUpperCase()}]</span><span className="text-white opacity-80 break-all">{log.msg}</span></div> ))}
+              {logs.length === 0 ? ( <div className="h-full flex items-center justify-center opacity-20 text-white font-black uppercase tracking-widest">Geen logs beschikbaar</div> ) : logs.map((log, i) => ( <div key={i} className={`flex gap-4 border-b border-white/5 sleeper-b pb-2 last:border-0 ${log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}`}><span className="opacity-40 whitespace-nowrap">[{log.timestamp}]</span><span className="font-bold whitespace-nowrap">[{log.type.toUpperCase()}]</span><span className="text-white opacity-80 break-all">{log.msg}</span></div> ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center animate-in fade-in duration-300 bg-white/95 backdrop-blur-3xl p-10">
+          <div className="bg-white w-full max-w-2xl p-16 rounded-[4rem] shadow-2xl border border-gray-100 flex flex-col items-center text-center">
+            <div className="w-24 h-24 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center mb-10">
+              <Key size={40} />
+            </div>
+            <h3 className="text-2xl font-black text-gray-900 uppercase tracking-widest mb-6">API Key Beheer</h3>
+            <p className="text-sm text-gray-500 leading-relaxed mb-10 max-w-sm">
+              Om de <strong>Live Voice</strong> assistent te gebruiken heb je een API-sleutel nodig van een Google Cloud-project met een gekoppelde betaalmethode.
+            </p>
+            
+            <div className="w-full p-8 bg-gray-50 rounded-[2.5rem] border border-gray-100 text-left mb-12">
+              <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2"><Info size={12} /> Belangrijke Informatie</h4>
+              <ul className="space-y-4">
+                <li className="flex gap-4 items-start">
+                  <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                  <p className="text-xs text-gray-600 font-medium leading-normal">
+                    Schakel facturering in via de <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-indigo-600 font-bold hover:underline">Google AI Studio Billing Docs</a>.
+                  </p>
+                </li>
+                <li className="flex gap-4 items-start">
+                  <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                  <p className="text-xs text-gray-600 font-medium leading-normal">
+                    Gebruik een sleutel uit een project binnen je <strong>betaalde organisatie</strong>. Gratis keys werken niet voor Live Voice.
+                  </p>
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col gap-4 w-full">
+              <button onClick={handleKeySetup} className="w-full py-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2rem] font-black text-lg uppercase tracking-[0.2em] shadow-xl shadow-indigo-100 transition-all active:scale-95 flex items-center justify-center gap-4">
+                <Plus size={20} /> Sleutel Selecteren / Updaten
+              </button>
+              <button onClick={() => setShowSettings(false)} className="w-full py-6 text-gray-400 hover:text-gray-900 text-xs font-black uppercase tracking-widest transition-colors">
+                Annuleren
+              </button>
             </div>
           </div>
         </div>
@@ -297,20 +382,46 @@ const TimerWidget = () => {
   }, [isRunning, timeLeft]);
 
   const RollingPicker = ({ max, value, onChange, label }: { max: number, value: number, onChange: (val: number) => void, label: string }) => {
-    const scrollRef = useRef<HTMLDivElement>(null); const itemHeight = 120; const items = Array.from({ length: max + 1 }, (_, i) => i);
-    const [isDragging, setIsDragging] = useState(false); const [startY, setStartY] = useState(0); const [startScroll, setStartScroll] = useState(0);
-    useEffect(() => { if (scrollRef.current && !isDragging) scrollRef.current.scrollTop = value * itemHeight; }, [value, isDragging]);
-    const handleScroll = () => { if (!scrollRef.current) return; const index = Math.round(scrollRef.current.scrollTop / itemHeight); if (items[index] !== undefined && items[index] !== value) onChange(items[index]); };
-    const handleMouseDown = (e: React.MouseEvent) => { setIsDragging(true); setStartY(e.pageY); setStartScroll(scrollRef.current?.scrollTop || 0); };
-    const handleMouseMove = (e: React.MouseEvent) => { if (!isDragging || !scrollRef.current) return; scrollRef.current.scrollTop = startScroll + (startY - e.pageY); };
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const itemHeight = 120;
+    const items = useMemo(() => Array.from({ length: max + 1 }, (_, i) => i), [max]);
+
+    useEffect(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = value * itemHeight;
+      }
+    }, [max]);
+
+    const handleScroll = () => {
+      if (!scrollRef.current) return;
+      const index = Math.round(scrollRef.current.scrollTop / itemHeight);
+      if (items[index] !== undefined && items[index] !== value) {
+        onChange(items[index]);
+      }
+    };
+
     return (
-      <div className="flex flex-col items-center flex-1 touch-none select-none cursor-ns-resize" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={() => setIsDragging(false)} onMouseLeave={() => setIsDragging(false)}>
+      <div className="flex flex-col items-center flex-1 select-none">
         <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-4">{label}</span>
         <div className="relative h-[360px] w-full flex items-center justify-center overflow-hidden">
            <div className="absolute top-1/2 left-0 right-0 h-[120px] -translate-y-1/2 border-y-2 border-indigo-100 bg-indigo-50/20 -z-10 pointer-events-none rounded-[2rem]" />
-           <div ref={scrollRef} onScroll={handleScroll} className="w-full h-full overflow-y-auto no-scrollbar snap-y snap-mandatory py-[120px] scroll-smooth" style={{ perspective: '1200px', touchAction: 'pan-y' }}>
+           <div 
+             ref={scrollRef} 
+             onScroll={handleScroll} 
+             className="w-full h-full overflow-y-auto no-scrollbar snap-y snap-mandatory py-[120px] touch-pan-y" 
+             style={{ perspective: '1200px' }}
+           >
              {items.map(i => (
-               <div key={i} className="h-[120px] flex items-center justify-center snap-center transition-all duration-300 pointer-events-none" style={{ opacity: Math.max(0.1, 1 - Math.abs(value-i)*0.4), transform: `scale(${Math.max(0.7, 1.25-Math.abs(value-i)*0.2)}) rotateX(${(i-value)*18}deg)`, transformOrigin: 'center center', backfaceVisibility: 'hidden' }}>
+               <div 
+                 key={i} 
+                 className="h-[120px] flex items-center justify-center snap-center transition-all duration-300 pointer-events-none" 
+                 style={{ 
+                   opacity: Math.max(0.1, 1 - Math.abs(value-i)*0.4), 
+                   transform: `scale(${Math.max(0.7, 1.25-Math.abs(value-i)*0.2)}) rotateX(${(i-value)*18}deg)`, 
+                   transformOrigin: 'center center', 
+                   backfaceVisibility: 'hidden' 
+                 }}
+               >
                  <span className="text-[96px] tabular-nums tracking-tighter font-black text-gray-900 drop-shadow-sm">{i.toString().padStart(2, '0')}</span>
                </div>
              ))}
@@ -346,47 +457,166 @@ const TimerWidget = () => {
 const EnergyOverlay = ({ data, onClose }: { data: EnergyData | null, onClose: () => void }) => {
   const [showNodeRed, setShowNodeRed] = useState(false);
   if (!data) return null;
-  const batteryPowerDisplay = data.batteryPower + 'W';
-  const gridTotalDisplay = data.gridTotal + 'W';
-  const gridSetpointDisplay = data.gridSetpoint + 'W';
-  const evPowerDisplay = data.evPower + 'W';
-  const evChargedTodayDisplay = data.evChargedToday + 'kWh';
-  const evChargedMonthDisplay = data.evChargedMonth + 'kWh';
-  const evTotalCounterDisplay = 'Totaal: ' + data.evTotalCounter + ' kWh (Lifetime)';
-  const solarTotalDisplay = data.solarTotal + 'W';
-  const solarACDisplay = 'AC: ' + data.solarAC + 'W';
-  const solarDCDisplay = 'DC: ' + data.solarDC + 'W';
-  const solarTotalDayDisplay = data.solarTotalDay + 'kWh';
-  const solarDCDayDisplay = data.solarDCDay + 'kWh';
+
+  const StatBlock = ({ label, value, unit, description, colorClass = "text-gray-900" }: { label: string, value: string | number, unit: string, description?: string, colorClass?: string }) => (
+    <div className="bg-gray-50/50 p-6 rounded-3xl border border-gray-100 hover:bg-white hover:shadow-md transition-all">
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{label}</p>
+      <div className="flex items-baseline gap-1.5">
+        <p className={`text-3xl font-black tracking-tight tabular-nums ${colorClass}`}>{value}</p>
+        <span className="text-sm font-bold text-gray-300">{unit}</span>
+      </div>
+      {description && <p className="text-[9px] font-bold text-gray-300 uppercase mt-2 tracking-wider leading-tight">{description}</p>}
+    </div>
+  );
 
   return (
     <div className="absolute inset-0 z-[250] flex items-center justify-center animate-in fade-in duration-300">
       <div className="absolute inset-0 bg-white/60 backdrop-blur-[100px]" onClick={onClose} />
       <div className="relative w-full h-full bg-white/40 shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
         <div className="p-8 flex justify-between items-center bg-white/20 backdrop-blur-xl shrink-0 border-b border-white/40">
-          <div className="flex items-center gap-8"><button onClick={() => setShowNodeRed(true)} className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center shadow-lg border border-emerald-400 text-white hover:scale-105 transition-transform active:scale-95"><Zap size={32} fill="currentColor" /></button><div><h3 className="text-3xl font-black text-gray-900 tracking-tight">Energie Monitor</h3><div className="flex items-center gap-3 mt-1"><a href={VICTRON_VRM_URL} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-500 font-bold uppercase hover:underline flex items-center gap-1.5">Victron VRM <ExternalLink size={10} /></a><div className="w-1 h-1 bg-gray-200 rounded-full" /><span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Node-RED Stream</span></div></div></div>
-          <button onClick={onClose} className="w-16 h-16 flex items-center justify-center bg-gray-900 hover:bg-black rounded-[2rem] transition-all text-white shadow-2xl active:scale-90 group"><X className="w-8 h-8 group-hover:rotate-90 transition-transform" /></button>
+          <div className="flex items-center gap-8">
+            <button onClick={() => setShowNodeRed(true)} className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center shadow-lg border border-emerald-400 text-emerald-600 hover:scale-105 transition-transform active:scale-95">
+              <Zap size={32} fill="currentColor" />
+            </button>
+            <div>
+              <h3 className="text-3xl font-black text-gray-900 tracking-tight">Energie Monitor</h3>
+              <div className="flex items-center gap-3 mt-1">
+                <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                  <Activity size={10} /> {data.meta.system}
+                </span>
+                <div className="w-1 h-1 bg-gray-200 rounded-full" />
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                  Laatste update: {new Date(data.meta.timestamp).toLocaleTimeString('nl-BE')}
+                </span>
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-16 h-16 flex items-center justify-center bg-gray-900 hover:bg-black rounded-[2rem] transition-all text-white shadow-2xl active:scale-90 group">
+            <X className="w-8 h-8 group-hover:rotate-90 transition-transform" />
+          </button>
         </div>
-        {showNodeRed && ( <div className="absolute inset-0 z-[300] bg-[#f0f0f0] flex flex-col animate-in slide-in-from-bottom-8"><div className="p-6 flex justify-between items-center bg-white border-b border-gray-200"><div className="flex items-center gap-4"><LayoutDashboard className="text-emerald-500" /><span className="font-black text-sm uppercase tracking-widest">Node-RED Full Control</span></div><button onClick={() => setShowNodeRed(false)} className="px-6 py-2 bg-gray-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Sluiten</button></div><iframe src={NODERED_DASHBOARD} className="flex-1 w-full border-none" /></div> )}
-        <div className="flex-1 overflow-hidden flex">
-          <div className="flex-1 overflow-y-auto p-8 space-y-8 no-scrollbar border-r border-white/40">
-            <div className="bg-white/80 rounded-[3rem] p-8 border border-white shadow-sm flex items-center gap-10">
-              <VisualBattery soc={data.soc} status={data.batteryStatus} />
-              <div className="flex-1 space-y-6">
-                <div className="flex justify-between items-start"><span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em]">Systeemstatus</span><div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${data.batteryStatus.toLowerCase() === 'opladen' ? 'bg-emerald-500 border-emerald-400 text-white' : 'bg-orange-100 border-orange-200 text-orange-700'}`}>{data.batteryStatus}</div></div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[9px] font-black text-gray-400 uppercase mb-1">Battery Power</p><p className="text-2xl font-black text-gray-800">{batteryPowerDisplay}</p></div>
-                  <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[9px] font-black text-gray-400 uppercase mb-1">Netgebruik</p><p className="text-2xl font-black text-gray-800">{gridTotalDisplay}</p></div>
-                  <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 col-span-2"><p className="text-[9px] font-black text-gray-400 uppercase mb-1">Setpoint</p><p className="text-2xl font-black text-gray-800">{gridSetpointDisplay}</p></div>
+
+        {showNodeRed && ( 
+          <div className="absolute inset-0 z-[300] bg-[#f0f0f0] flex flex-col animate-in slide-in-from-bottom-8">
+            <div className="p-6 flex justify-between items-center bg-white border-b border-gray-200">
+              <div className="flex items-center gap-4"><LayoutDashboard className="text-emerald-500" /><span className="font-black text-sm uppercase tracking-widest">Node-RED Full Control</span></div>
+              <button onClick={() => setShowNodeRed(false)} className="px-6 py-2 bg-gray-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Sluiten</button>
+            </div>
+            <iframe src={NODERED_DASHBOARD} className="flex-1 w-full border-none" />
+          </div> 
+        )}
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto no-scrollbar grid grid-cols-1 lg:grid-cols-2 gap-px bg-white/10 p-1">
+          
+          {/* Section: Solar */}
+          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-b border-r border-white/20">
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-black text-amber-600 uppercase tracking-[0.4em] flex items-center gap-2">
+                <Sun size={16} /> Solar Generation
+              </span>
+              <div className="px-4 py-1.5 bg-amber-50 border border-amber-100 rounded-full text-[10px] font-black text-amber-700 uppercase tracking-widest">
+                {data.solar.total}W Current
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <StatBlock label="Grid Connected (AC)" value={data.solar.ac} unit="W" description="AC PV System Output" colorClass="text-amber-600" />
+              <StatBlock label="DC Connected (DC)" value={data.solar.dc} unit="W" description="DC MPPT Output" colorClass="text-amber-600" />
+              <StatBlock label="Day Total (AC)" value={data.solar.acTotalDay} unit="kWh" description="Grid System Total Today" />
+              <StatBlock label="Day Total (DC)" value={data.solar.dcTotalDay} unit="W" description="DC MPPT Total Today" />
+              <StatBlock label="Combined Day Total" value={data.solar.totalDay} unit="kWh" description="Full PV Yield Today" colorClass="text-emerald-600" />
+              <div className="bg-blue-600 rounded-3xl p-6 text-white shadow-xl flex flex-col justify-center relative overflow-hidden">
+                <Sparkles className="absolute -right-4 -bottom-4 w-24 h-24 opacity-10" />
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 mb-2">Solar Forecast</p>
+                <div className="flex items-baseline gap-1.5">
+                  <p className="text-4xl font-black">{data.forecast.prediction}</p>
+                  <span className="text-sm font-bold opacity-40">kWh</span>
+                </div>
+                <p className="text-[9px] font-bold uppercase mt-3 tracking-widest opacity-80 sleeper-snug leading-snug">{data.forecast.summary}</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Section: Battery */}
+          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-b border-white/20">
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-black text-emerald-600 uppercase tracking-[0.4em] flex items-center gap-2">
+                <BatteryIcon size={16} /> Energy Storage
+              </span>
+              <div className={`px-4 py-1.5 border rounded-full text-[10px] font-black uppercase tracking-widest ${data.battery.status.toLowerCase() === 'opladen' ? 'bg-emerald-500 border-emerald-400 text-white' : 'bg-orange-100 border-orange-200 text-orange-700'}`}>
+                {data.battery.status}
+              </div>
+            </div>
+
+            <div className="flex gap-10 items-center bg-white/60 p-8 rounded-[3rem] border border-white">
+              <VisualBattery soc={data.battery.soc} status={data.battery.status} />
+              <div className="flex-1 grid grid-cols-1 gap-4">
+                <StatBlock label="Current Power" value={data.battery.power} unit="W" description="Charging/Discharging Rate" />
+                <StatBlock label="State of Charge" value={data.battery.soc} unit="%" description="Available Capacity" colorClass="text-emerald-600" />
+              </div>
+            </div>
+          </section>
+
+          {/* Section: Grid & House */}
+          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-r border-white/20">
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-black text-blue-600 uppercase tracking-[0.4em] flex items-center gap-2">
+                <UtilityPole size={16} /> Power Consumption
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <StatBlock label="House Load (AC)" value={data.grid.acPower} unit="W" description="Total domestic power use" colorClass="text-gray-900" />
+              <StatBlock label="Grid Connection" value={data.grid.total} unit="W" description="Net Import/Export" colorClass={data.grid.total > 0 ? "text-rose-500" : "text-emerald-500"} />
+              <StatBlock label="Grid Setpoint" value={data.grid.setpoint} unit="W" description="Inverter target setpoint" />
+              <StatBlock label="Extra DC Load" value={data.grid.dcPower} unit="W" description="DC Charger/Load presence" />
+            </div>
+          </section>
+
+          {/* Section: EV Charger */}
+          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-white/20">
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-black text-blue-500 uppercase tracking-[0.4em] flex items-center gap-2">
+                <Car size={16} /> Kia EV9 Charger
+              </span>
+              <div className={`px-4 py-1.5 border rounded-full text-[10px] font-black uppercase tracking-widest ${data.ev.power > 100 ? 'bg-blue-600 border-blue-500 text-white animate-pulse' : 'bg-gray-100 border-gray-200 text-gray-500'}`}>
+                {data.ev.status}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 bg-blue-50/50 p-8 rounded-[2.5rem] border border-blue-100 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Current Charging Power</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-5xl font-black text-blue-600 tabular-nums">{data.ev.power}</p>
+                    <span className="text-xl font-bold text-blue-300">W</span>
+                  </div>
+                </div>
+                <Car size={48} className="text-blue-200" />
+              </div>
+              <StatBlock label="Today" value={data.ev.chargedToday} unit="kWh" description="Energy delivered today" />
+              <StatBlock label="This Month" value={data.ev.chargedMonth} unit="kWh" description="Energy delivered this month" />
+              <StatBlock label="Start Day" value={data.ev.startDay} unit="kWh" description="Reading at 00:00" />
+              <StatBlock label="Start Month" value={data.ev.startMonth} unit="kWh" description="Reading at month start" />
+              <div className="col-span-2 bg-gray-900 rounded-3xl p-6 flex items-center justify-between group overflow-hidden relative">
+                <History className="absolute -left-4 -bottom-4 w-24 h-24 text-white/5 group-hover:scale-110 transition-transform" />
+                <div className="relative z-10">
+                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Lifetime Counter</p>
+                   <div className="flex items-baseline gap-1.5">
+                    <p className="text-3xl font-black text-white tabular-nums">{data.ev.totalCounter}</p>
+                    <span className="text-sm font-bold text-gray-500">kWh</span>
+                  </div>
+                </div>
+                <div className="text-right opacity-40">
+                  <TrendingUp size={24} className="text-white" />
                 </div>
               </div>
             </div>
-            <div className="bg-white/80 rounded-[3rem] p-8 border border-white shadow-sm relative overflow-hidden group"><div className="absolute top-8 right-8 w-32 h-20 opacity-20 transition-all duration-500 group-hover:opacity-100 group-hover:scale-110"><svg viewBox="0 0 100 40" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full drop-shadow-xl"><path d="M10 30L15 15C15 15 25 5 50 5C75 5 85 15 85 15L90 30H10Z" fill="#ff0000" /><circle cx="20" cy="30" r="5" fill="#333" /><circle cx="80" cy="30" r="5" fill="#333" /></svg></div><div className="relative z-10"><span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] block mb-6 flex items-center gap-2"><Car size={16} className="text-blue-500"/> KIA EV9 Lader</span><div className="flex items-center gap-6 mb-8"><div className="bg-blue-600 p-8 rounded-[2rem] text-white shadow-lg shadow-blue-100"><p className="text-[10px] font-black uppercase opacity-60 mb-1">Vermogen</p><p className="text-4xl font-black">{evPowerDisplay}</p></div><div className="flex-1 grid grid-cols-2 gap-4"><div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[9px] font-black text-gray-400 uppercase mb-1">Vandaag</p><p className="text-2xl font-black text-gray-800">{evChargedTodayDisplay}</p></div><div className="bg-gray-50 p-4 rounded-2xl border border-gray-100"><p className="text-[9px] font-black text-gray-400 uppercase mb-1">Deze Maand</p><p className="text-2xl font-black text-gray-800">{evChargedMonthDisplay}</p></div></div></div><div className="flex justify-end pt-2 border-t border-gray-100"><span className="text-[9px] font-black text-gray-300 uppercase tracking-widest">{evTotalCounterDisplay}</span></div></div></div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-8 space-y-8 no-scrollbar">
-            <div className="bg-white/80 rounded-[3rem] p-8 border border-white shadow-sm"><span className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] block mb-6 flex items-center gap-2"><Sun size={14} className="text-amber-500"/> Zonne-energie</span><div className="p-10 bg-amber-50 rounded-[2.5rem] border border-amber-100 mb-6"><p className="text-[10px] font-black text-amber-600 uppercase mb-1">Huidige Opbrengst</p><p className="text-6xl font-black text-amber-700">{solarTotalDisplay}</p><div className="flex gap-4 mt-3"><span className="text-[9px] font-bold text-amber-500 uppercase">{solarACDisplay}</span><span className="text-[9px] font-bold text-amber-500 uppercase">{solarDCDisplay}</span></div></div><div className="grid grid-cols-2 gap-4"><div className="p-4 bg-gray-50 rounded-2xl text-center border border-gray-100"><p className="text-[9px] font-black text-gray-400 uppercase mb-1">Totaal Vandaag</p><p className="text-3xl font-black text-gray-800">{solarTotalDayDisplay}</p></div><div className="p-4 bg-gray-900 rounded-2xl text-center text-white"><p className="text-[9px] font-black text-gray-400 uppercase mb-1">DC Day</p><p className="text-3xl font-black text-white">{solarDCDayDisplay}</p></div></div></div>
-            <div className="bg-blue-600 rounded-[3rem] p-8 text-white relative overflow-hidden shadow-xl shadow-blue-100"><Sparkles className="absolute -top-10 -right-10 w-48 h-48 opacity-10" /><div className="relative z-10"><span className="text-[11px] font-black uppercase tracking-[0.4em] opacity-60 block mb-6">Solar Forecast</span><div className="flex items-baseline gap-4 mb-6"><p className="text-8xl font-black tracking-tighter">{data.forecastPrediction}</p><span className="text-2xl font-black opacity-40">kWh</span></div><div className="px-6 py-3 bg-white/10 rounded-2xl border border-white/10 text-lg font-bold">{data.forecastSummary}</div></div></div>
-          </div>
+          </section>
+
         </div>
       </div>
     </div>
@@ -482,10 +712,18 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
+  const [showPhotosLog, setShowPhotosLog] = useState(false);
+  const [photosLogs, setPhotosLogs] = useState<LogEntry[]>([]);
+
+  const addLog = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString('nl-BE', { hour12: false });
+    setPhotosLogs(prev => [...prev, { timestamp, msg, type }].slice(-100));
+  };
 
   const createPickerSession = async () => {
     if (!accessToken) return;
     setLoading(true);
+    addLog("Starten van een nieuwe Google Photos Picker sessie...", 'info');
     try {
       const response = await fetch('https://photospicker.googleapis.com/v1/sessions', {
         method: 'POST',
@@ -497,6 +735,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
       });
       const data = await response.json();
       if (data.pickerUri) {
+        addLog(`Picker sessie aangemaakt. ID: ${data.id}. URI: ${data.pickerUri}`, 'success');
         setIsPicking(true);
         const pickerWindow = window.open(data.pickerUri, '_blank');
         
@@ -506,19 +745,23 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
               headers: { Authorization: 'Bearer ' + accessToken }
             });
             const checkData = await checkResp.json();
+            addLog(`Polling sessie ${data.id} - Status mediaItemsSet: ${checkData.mediaItemsSet}`, 'info');
             if (checkData.mediaItemsSet) {
               clearInterval(pollTimer);
+              addLog("Gebruiker heeft foto's geselecteerd. Items ophalen...", 'success');
               await fetchSessionItems(data.id);
               if (pickerWindow) pickerWindow.close();
               setIsPicking(false);
             }
-          } catch (e) {
-            console.error("Polling error", e);
+          } catch (e: any) {
+            addLog(`Fout tijdens polling: ${e.message}`, 'error');
           }
         }, 3000);
+      } else {
+        addLog(`Kon pickerUri niet vinden in response: ${JSON.stringify(data)}`, 'error');
       }
-    } catch (e) {
-      console.error("Picker Session Error:", e);
+    } catch (e: any) {
+      addLog(`Picker Session Error: ${e.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -526,21 +769,29 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
   const fetchSessionItems = async (sessionId: string) => {
     try {
+      addLog(`Media items ophalen voor sessie: ${sessionId}`, 'info');
       const response = await fetch(`https://photospicker.googleapis.com/v1/mediaItems?sessionId=${sessionId}`, {
         headers: { Authorization: 'Bearer ' + accessToken }
       });
       const data = await response.json();
       if (data.mediaItems) {
-        const newPhotos = [...photos, ...data.mediaItems];
+        addLog(`${data.mediaItems.length} media items opgehaald.`, 'success');
+        const validItems = data.mediaItems.filter((item: any) => item.mediaFileUri || item.previewUri);
+        addLog(`${validItems.length} geldige items na filtering.`, 'info');
+        
+        const newPhotos = [...photos, ...validItems];
         setPhotos(newPhotos);
         localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos));
+      } else {
+        addLog(`Geen media items gevonden in response: ${JSON.stringify(data)}`, 'error');
       }
-    } catch (e) {
-      console.error("Fetch Items Error:", e);
+    } catch (e: any) {
+      addLog(`Fetch Items Error: ${e.message}`, 'error');
     }
   };
 
   const clearSlideshow = () => {
+    addLog("Slideshow gewist.", 'info');
     setPhotos([]);
     localStorage.removeItem(PHOTOS_CACHE_KEY);
     setCurrentIndex(0);
@@ -592,26 +843,25 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
     <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden relative group">
       {photos.map((photo, idx) => {
         const imageSource = photo.mediaFileUri || photo.previewUri;
+        if (!imageSource) return null;
+        
         return (
           <div 
             key={photo.id + idx} 
             className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100' : 'opacity-0'}`}
           >
-            {imageSource && (
-              <img 
-                src={imageSource} 
-                alt={photo.filename || ""} 
-                className="w-full h-full object-cover" 
-                onError={(e) => {
-                  console.error("Slideshow image load error", photo);
-                }}
-              />
-            )}
+            <img 
+              src={imageSource} 
+              alt={photo.filename || ""} 
+              className="w-full h-full object-cover" 
+              onError={() => addLog(`Fout bij laden van foto: ${photo.filename}`, 'error')}
+              onLoad={() => idx === currentIndex && addLog(`Foto geladen: ${photo.filename}`, 'info')}
+            />
           </div>
         );
       })}
       
-      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10 pointer-events-none" />
       
       <div className="absolute top-10 right-10 flex gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
         <button onClick={createPickerSession} className="h-14 px-6 bg-white/20 backdrop-blur-md rounded-2xl flex items-center gap-3 text-white hover:bg-white/40 transition-colors">
@@ -625,17 +875,95 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         </div>
       </div>
 
-      <div className="absolute bottom-10 left-10 text-white flex flex-col gap-1">
-        <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60">Slideshow • {photos.length} Foto's</span>
-        <span className="text-xs font-bold truncate max-w-sm">{photos[currentIndex]?.filename}</span>
+      <div className="absolute bottom-10 left-10 text-white flex flex-col gap-1 z-20">
+        <button 
+          onClick={() => setShowPhotosLog(true)}
+          className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 hover:opacity-100 transition-opacity text-left cursor-help"
+        >
+          Slideshow • {photos.length} Foto's
+        </button>
+        <span className="text-xs font-bold truncate max-w-sm pointer-events-none">{photos[currentIndex]?.filename}</span>
       </div>
+
+      {showPhotosLog && (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center animate-in fade-in bg-black/90 backdrop-blur-md p-10">
+          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center">
+              <div className="flex items-center gap-4 text-blue-400">
+                <ImageIcon size={24} />
+                <h3 className="font-black text-xs uppercase tracking-[0.4em]">Google Photos Debug Log</h3>
+              </div>
+              <div className="flex items-center gap-4">
+                <button onClick={() => { const text = photosLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all">
+                  <Copy size={18} />
+                </button>
+                <button onClick={() => setPhotosLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all">
+                  <Trash2 size={18} />
+                </button>
+                <button onClick={() => setShowPhotosLog(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-8 space-y-2 font-mono text-[10px] scroll-smooth no-scrollbar">
+              {photosLogs.length === 0 ? (
+                <div className="h-full flex items-center justify-center opacity-20 text-white font-black uppercase tracking-widest">Geen logs</div>
+              ) : photosLogs.map((log, i) => (
+                <div key={i} className={`flex gap-4 border-b border-white/5 pb-2 last:border-0 ${log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}`}>
+                  <span className="opacity-40 whitespace-nowrap">[{log.timestamp}]</span>
+                  <span className="font-bold whitespace-nowrap">[{log.type.toUpperCase()}]</span>
+                  <span className="text-white opacity-80 break-all">{log.msg}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onToggleCollapse }: { accessToken: string | null; items: AgendaItem[]; isLoading: boolean; onRefresh: () => void; isCollapsed: boolean; onToggleCollapse: () => void; }) => {
   const [selectedTimezone, setSelectedTimezone] = useState<string>('Europe/Brussels');
-  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; }), []);
+  const [showWeekPicker, setShowWeekPicker] = useState(false);
+  const [selectedWeekType, setSelectedWeekType] = useState<'rolling' | Date>('rolling');
+
+  const weekOptions = useMemo(() => {
+    const options: { type: 'rolling' | Date; label: string }[] = [{ type: 'rolling', label: 'Komende 7 dagen' }];
+    const baseDate = new Date();
+    const day = baseDate.getDay();
+    const diff = baseDate.getDate() - day + (day === 0 ? -6 : 1);
+    const firstMonday = new Date(baseDate.setDate(diff));
+    firstMonday.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < 12; i++) {
+      const mon = new Date(firstMonday);
+      mon.setDate(mon.getDate() + i * 7);
+      const sun = new Date(mon);
+      sun.setDate(sun.getDate() + 6);
+      
+      const label = `${mon.getDate().toString().padStart(2, '0')}/${(mon.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getMonth() + 1).toString().padStart(2, '0')}`;
+      options.push({ type: mon, label });
+    }
+    return options;
+  }, []);
+
+  const weekDays = useMemo(() => {
+    if (selectedWeekType === 'rolling') {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() + i);
+        return d;
+      });
+    } else {
+      const baseDate = selectedWeekType;
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(baseDate);
+        d.setDate(d.getDate() + i);
+        return d;
+      });
+    }
+  }, [selectedWeekType]);
   
   const getEventsForDay = (date: Date) => {
     const dayStr = date.toLocaleDateString('en-CA', { timeZone: selectedTimezone });
@@ -653,8 +981,17 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
     setSelectedTimezone(prev => prev === 'UTC' ? 'Europe/Brussels' : 'UTC');
   };
 
+  const isWaste = (title: string) => ['PMD', 'RA', 'P/K'].includes(title.trim().toUpperCase());
+
+  const currentLabel = useMemo(() => {
+    if (selectedWeekType === 'rolling') return 'Komende 7 dagen';
+    const sun = new Date(selectedWeekType);
+    sun.setDate(sun.getDate() + 6);
+    return `${selectedWeekType.getDate().toString().padStart(2, '0')}/${(selectedWeekType.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getMonth() + 1).toString().padStart(2, '0')}`;
+  }, [selectedWeekType]);
+
   return (
-    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-full'}`}>
+    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-[90%]'}`}>
       <div className="flex justify-between items-center shrink-0 mb-4">
         <div className="flex items-center gap-6">
           <h2 className="text-4xl font-light text-gray-800 tracking-tight">Week Agenda</h2>
@@ -676,7 +1013,43 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
           </button>
         </div>
         <div className="flex items-center gap-8">
-          <div className="text-[11px] font-black text-gray-300 uppercase tracking-[0.4em]">Komende 7 dagen</div>
+          <div className="relative">
+            <button 
+              onClick={() => setShowWeekPicker(!showWeekPicker)}
+              className="text-[11px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-indigo-500 transition-colors py-2"
+            >
+              {currentLabel}
+              <ChevronDown size={14} className={`transition-transform ${showWeekPicker ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showWeekPicker && (
+              <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-gray-100 rounded-[1.5rem] shadow-2xl z-[100] p-2 animate-in fade-in zoom-in-95 duration-200">
+                <div className="max-h-[350px] overflow-y-auto no-scrollbar">
+                  {weekOptions.map((opt, i) => (
+                    <button 
+                      key={i}
+                      onClick={() => {
+                        setSelectedWeekType(opt.type);
+                        setShowWeekPicker(false);
+                      }}
+                      className={`w-full text-left px-5 py-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-between group ${
+                        (opt.type === 'rolling' && selectedWeekType === 'rolling') || 
+                        (opt.type instanceof Date && selectedWeekType instanceof Date && opt.type.getTime() === selectedWeekType.getTime()) 
+                        ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-50 text-gray-400 hover:text-gray-700'
+                      }`}
+                    >
+                      {opt.label}
+                      <ChevronRight size={14} className={`opacity-0 group-hover:opacity-100 transition-opacity ${
+                        (opt.type === 'rolling' && selectedWeekType === 'rolling') || 
+                        (opt.type instanceof Date && selectedWeekType instanceof Date && opt.type.getTime() === selectedWeekType.getTime()) 
+                        ? 'opacity-100' : ''}`} 
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
           <button onClick={onToggleCollapse} className="w-12 h-12 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-400 rounded-2xl transition-all active:scale-90">
             {isCollapsed ? <ChevronDown size={24} /> : <ChevronUp size={24} />}
           </button>
@@ -698,6 +1071,8 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
             <div className="grid grid-cols-7 h-full gap-px bg-gray-100 border border-gray-100 rounded-[2.5rem] overflow-hidden">
               {weekDays.map((date, idx) => { 
                 const dayEvents = getEventsForDay(date); 
+                const wasteEvents = dayEvents.filter(e => isWaste(e.title));
+                const regularEvents = dayEvents.filter(e => !isWaste(e.title));
                 const today = new Date().toDateString() === date.toDateString(); 
                 return ( 
                   <div key={idx} className={`bg-white flex flex-col min-w-0 ${today ? 'bg-blue-50/20' : ''}`}>
@@ -705,10 +1080,23 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                       <div className={`text-[11px] font-black tracking-widest ${today ? 'text-blue-600' : 'text-gray-400'}`}>
                         {date.toLocaleDateString('nl-BE', { weekday: 'short' }).toUpperCase()}
                       </div>
-                      <div className={`text-3xl font-black mt-1 ${today ? 'text-blue-600' : 'text-gray-800'}`}>{date.getDate()}</div>
+                      <div className="flex items-center justify-center gap-2 mt-1">
+                        <div className={`text-3xl font-black ${today ? 'text-blue-600' : 'text-gray-800'}`}>{date.getDate()}</div>
+                        {wasteEvents.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            {wasteEvents.map(w => {
+                              const t = w.title.trim().toUpperCase();
+                              if (t === 'PMD') return <Recycle key={w.id} size={20} className="text-blue-500" strokeWidth={2.5} />;
+                              if (t === 'RA') return <Trash2 key={w.id} size={20} className="text-gray-400" strokeWidth={2.5} />;
+                              if (t === 'P/K') return <Package key={w.id} size={20} className="text-amber-500" strokeWidth={2.5} />;
+                              return null;
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-0 space-y-0.5 no-scrollbar">
-                      {dayEvents.sort((a,b) => (a.isAllDay ? -1 : 1) - (b.isAllDay ? -1 : 1)).map(item => ( 
+                      {regularEvents.sort((a,b) => (a.isAllDay ? -1 : 1) - (b.isAllDay ? -1 : 1)).map(item => ( 
                         <div 
                           key={item.id + date.toISOString()} 
                           onClick={() => window.open(item.htmlLink, '_blank')} 
@@ -745,113 +1133,307 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   );
 };
 
-const SpotifyWidget = ({ config }: { config: SpotifyConfig | null }) => {
+const SpotifyWidget = ({ config, accessToken, onRefreshConfig }: { config: SpotifyConfig | null; accessToken: string | null; onRefreshConfig: () => void }) => {
   const [isPlaying, setIsPlaying] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editUsername, setEditUsername] = useState(config?.username || "");
+  const [editPasswordB64, setEditPasswordB64] = useState(config?.password_b64 || "");
+
+  useEffect(() => {
+    if (config) {
+      setEditUsername(config.username);
+      setEditPasswordB64(config.password_b64);
+    }
+  }, [config]);
+
+  const handleSaveConfig = async () => {
+    if (!accessToken) return;
+    setIsSaving(true);
+    try {
+      const searchResp = await fetch("https://www.googleapis.com/drive/v3/files?q=name='WalboFamiilyConfig.txt' and trashed=false", {
+        headers: { Authorization: 'Bearer ' + accessToken }
+      });
+      if (!searchResp.ok) throw new Error(`Search failed: ${searchResp.statusText}`);
+      
+      const searchData = await searchResp.json();
+      let fileId = null;
+      let existingContent: any = { connections: { spotify: { username: "", password_b64: "" } } };
+
+      if (searchData.files && searchData.files.length > 0) {
+        fileId = searchData.files[0].id;
+        const fileResp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+          headers: { Authorization: 'Bearer ' + accessToken }
+        });
+        
+        if (fileResp.ok) {
+           const text = await fileResp.text();
+           try {
+             existingContent = text ? JSON.parse(text) : { connections: { spotify: { username: "", password_b64: "" } } };
+           } catch (e) {
+             existingContent = { connections: { spotify: { username: "", password_b64: "" } } };
+           }
+        }
+      }
+
+      const currentConnections = existingContent?.connections || {};
+      const newContent = {
+        ...existingContent,
+        connections: {
+          ...currentConnections,
+          spotify: {
+            username: editUsername,
+            password_b64: editPasswordB64
+          }
+        }
+      };
+
+      const bodyContent = JSON.stringify(newContent, null, 2);
+
+      if (fileId) {
+        const updateResp = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+          method: 'PATCH',
+          headers: { 
+            'Authorization': 'Bearer ' + accessToken,
+            'Content-Type': 'text/plain'
+          },
+          body: bodyContent
+        });
+        if (!updateResp.ok) throw new Error(`Update failed: ${updateResp.statusText}`);
+      } else {
+        const metadata = {
+          name: 'WalboFamiilyConfig.txt',
+          mimeType: 'text/plain'
+        };
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        form.append('file', new Blob([bodyContent], { type: 'text/plain' }));
+
+        const createResp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + accessToken },
+          body: form
+        });
+        if (!createResp.ok) throw new Error(`Create failed: ${createResp.statusText}`);
+      }
+
+      alert("Spotify configuratie succesvol opgeslagen op Google Drive!");
+      setShowSettings(false);
+      onRefreshConfig();
+    } catch (e: any) {
+      alert(`Fout bij opslaan van configuratie: ${e.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
   
-  if (!config) return (
-    <div className="p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 flex-1 flex flex-col items-center justify-center text-center">
-      <div className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center mb-4">
-        <Music className="text-emerald-400" />
+  const WidgetContent = () => (
+    <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+      <div className="relative group">
+         <div className="w-40 h-40 bg-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl transition-transform group-hover:scale-105 duration-500">
+           <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=400&auto=format&fit=crop" alt="Album Art" className="w-full h-full object-cover" />
+         </div>
+         <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg">
+           <Volume2 size={16} />
+         </div>
       </div>
-      <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Wacht op configuratie...</p>
+
+      <div className="text-center w-full px-4">
+        <h4 className="text-xl font-black text-gray-800 tracking-tight truncate">Mockingbird</h4>
+        <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">Eminem</p>
+      </div>
+
+      <div className="w-full space-y-3 px-4">
+        <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
+          <div className="h-full bg-emerald-400 w-2/3 rounded-full" />
+        </div>
+        <div className="flex justify-between text-[10px] font-black text-gray-300 tabular-nums">
+          <span>2:34</span>
+          <span>4:11</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-10 text-gray-400">
+        <button className="hover:text-emerald-500 transition-colors"><SkipBack size={24} fill="currentColor" /></button>
+        <button onClick={() => setIsPlaying(!isPlaying)} className="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black transition-all active:scale-90 shadow-xl">
+          {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
+        </button>
+        <button className="hover:text-emerald-500 transition-colors"><SkipForward size={24} fill="currentColor" /></button>
+      </div>
     </div>
   );
 
   return (
-    <div className="p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 flex-1 flex flex-col transition-all hover:border-emerald-200">
+    <div className="p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 flex-1 flex flex-col transition-all hover:border-emerald-200 relative">
       <div className="flex justify-between items-center mb-6">
         <span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2">
           <Music size={10} className="text-emerald-500" /> Spotify
         </span>
-        <div className="flex items-center gap-1.5">
-           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-           <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{config.username}</span>
+        <div className="flex items-center gap-4">
+           {config && (
+             <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{config.username}</span>
+             </div>
+           )}
+           <button onClick={() => setShowSettings(true)} className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-400 rounded-xl hover:text-emerald-500 transition-colors">
+              <Settings size={14} />
+            </button>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center space-y-6">
-        <div className="relative group">
-           <div className="w-40 h-40 bg-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl transition-transform group-hover:scale-105 duration-500">
-             <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=400&auto=format&fit=crop" alt="Album Art" className="w-full h-full object-cover" />
-           </div>
-           <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg">
-             <Volume2 size={16} />
-           </div>
-        </div>
-
-        <div className="text-center w-full px-4">
-          <h4 className="text-xl font-black text-gray-800 tracking-tight truncate">Mockingbird</h4>
-          <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">Eminem</p>
-        </div>
-
-        <div className="w-full space-y-3 px-4">
-          <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
-            <div className="h-full bg-emerald-400 w-2/3 rounded-full" />
+      {!config ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
+          <div className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center mb-6">
+            <Music className="text-emerald-400" />
           </div>
-          <div className="flex justify-between text-[10px] font-black text-gray-300 tabular-nums">
-            <span>2:34</span>
-            <span>4:11</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-10 text-gray-400">
-          <button className="hover:text-emerald-500 transition-colors"><SkipBack size={24} fill="currentColor" /></button>
-          <button onClick={() => setIsPlaying(!isPlaying)} className="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black transition-all active:scale-90 shadow-xl">
-            {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
+          <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 leading-relaxed">Configuratie ontbreekt of is onvolledig</p>
+          <button onClick={() => setShowSettings(true)} className="px-8 py-3 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 active:scale-95 transition-all">
+            Instellen
           </button>
-          <button className="hover:text-emerald-500 transition-colors"><SkipForward size={24} fill="currentColor" /></button>
         </div>
-      </div>
+      ) : (
+        <WidgetContent />
+      )}
+
+      {showSettings && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center animate-in fade-in duration-300 bg-white/95 backdrop-blur-3xl p-10">
+          <div className="bg-white w-full max-w-2xl p-16 rounded-[4rem] shadow-2xl border border-gray-100 flex flex-col">
+            <div className="flex justify-between items-center w-full mb-10">
+              <div className="flex items-center gap-6">
+                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-[1.5rem] flex items-center justify-center">
+                  <Music size={28} />
+                </div>
+                <h3 className="text-2xl font-black text-gray-900 uppercase tracking-widest">Spotify Beheer</h3>
+              </div>
+              <button onClick={() => setShowSettings(false)} className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-500 leading-relaxed mb-10">
+              Deze configuratie wordt gesynchroniseerd via het bestand <strong>WalboFamiilyConfig.txt</strong> op je Google Drive.
+            </p>
+
+            <div className="space-y-8 mb-12">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Spotify Gebruikersnaam</label>
+                <input 
+                  type="text" 
+                  value={editUsername}
+                  onChange={(e) => setEditUsername(e.target.value)}
+                  placeholder="Bijv. jandevries"
+                  className="w-full px-8 py-5 bg-gray-50 border border-gray-100 rounded-[1.5rem] text-sm font-bold focus:outline-none focus:border-emerald-400 transition-colors"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Password (Base64)</label>
+                <div className="relative">
+                  <input 
+                    type="password" 
+                    value={editPasswordB64}
+                    onChange={(e) => setEditPasswordB64(e.target.value)}
+                    placeholder="Base64 encoded string"
+                    className="w-full px-8 py-5 bg-gray-50 border border-gray-100 rounded-[1.5rem] text-sm font-bold focus:outline-none focus:border-emerald-400 transition-colors"
+                  />
+                  <div className="absolute right-6 top-1/2 -translate-y-1/2 text-emerald-500">
+                    <Key size={18} />
+                  </div>
+                </div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest ml-4 mt-2">Let op: Gebruik een base64 encoded wachtwoord voor veiligheid.</p>
+              </div>
+            </div>
+
+            <div className="w-full p-8 bg-emerald-50 rounded-[2rem] border border-emerald-100 mb-12">
+              <h4 className="text-[10px] font-black text-emerald-700 uppercase tracking-[0.2em] mb-4 flex items-center gap-2"><Info size={12} /> Instructies</h4>
+              <p className="text-[11px] text-emerald-600 font-medium leading-relaxed">
+                De Hub leest je Spotify gegevens uit de 'connections' sectie van het config bestand. 
+                Zorg ervoor dat je ingelogd bent met Google om deze wijzigingen direct naar Drive te schrijven.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <button 
+                onClick={handleSaveConfig} 
+                disabled={isSaving || !accessToken}
+                className={`w-full py-8 rounded-[2rem] font-black text-lg uppercase tracking-[0.2em] shadow-xl transition-all active:scale-95 flex items-center justify-center gap-4 ${accessToken ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-100' : 'bg-gray-100 text-gray-400'}`}
+              >
+                {isSaving ? <Loader2 className="animate-spin" /> : <><Save size={20} /> Opslaan naar Google Drive</>}
+              </button>
+              {!accessToken && (
+                <p className="text-center text-rose-500 text-[10px] font-black uppercase tracking-widest mt-2">Log eerst in met Google om te kunnen opslaan.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error: string | null, onClick: () => void }) => {
-  const isEvCharging = data && data.evPower > 100;
-  const isDcLoading = data && data.dcPower > 100;
-  const batteryStatus = data ? data.batteryStatus : '';
-  
-  // Kleur op basis van batteryStatus: Opladen = emerald, Ontladen = rose, anders grijs
+const EnergyWidget = ({ data, error, onTitleClick, apiUrl }: { data: EnergyData | null, error: string | null, onTitleClick: () => void, apiUrl: string }) => {
+  const isEvCharging = data && data.ev.power > 100;
+  const isDcLoading = data && data.grid.dcPower > 100;
+  const batteryStatus = data ? data.battery.status : '';
   const batteryIconColor = batteryStatus.toLowerCase() === 'opladen' ? "text-emerald-500" : 
                           batteryStatus.toLowerCase() === 'ontladen' ? "text-rose-500" : "text-gray-400";
   
   return (
-    <button onClick={onClick} className="w-full p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 text-left hover:border-emerald-400 hover:shadow-xl transition-all active:scale-[0.98] overflow-hidden">
-      <div className="flex justify-between items-center mb-6"><span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2"><Zap size={10} className="text-emerald-500" /> Energie Status</span>{error ? (<span className="text-[9px] font-black text-rose-500 uppercase flex items-center gap-1"><AlertTriangle size={10}/> {error}</span>) : (<span className="text-[9px] font-black text-emerald-500 uppercase flex items-center gap-1"><CheckCircle2 size={10}/> LIVE</span>)}</div>
+    <div className="w-full p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 text-left hover:border-emerald-400 hover:shadow-xl transition-all overflow-hidden relative group">
+      <div className="flex justify-between items-center mb-6">
+        <button onClick={onTitleClick} className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-emerald-500 transition-colors">
+          <Zap size={10} className="text-emerald-500" /> Energie Status <FileText size={10} className="opacity-40" />
+        </button>
+        {error ? (
+          <a 
+            href={apiUrl} 
+            target="_blank" 
+            rel="noreferrer" 
+            className="text-[9px] font-black text-rose-500 uppercase flex items-center gap-1 hover:underline animate-pulse"
+          >
+            <AlertTriangle size={10}/> {error} <ExternalLink size={8} />
+          </a>
+        ) : (
+          <span className="text-[9px] font-black text-emerald-500 uppercase flex items-center gap-1">
+            <CheckCircle2 size={10}/> LIVE
+          </span>
+        )}
+      </div>
       <div className="space-y-8">
         <div className="flex items-center justify-between gap-4">
           <div className="flex-1">
             <p className="text-[12px] font-black text-gray-400 uppercase tracking-[0.2em] mb-1">Huis Verbruik</p>
             <div className="flex items-baseline gap-2">
-              <p className="text-7xl font-black text-gray-900 leading-none tracking-tighter tabular-nums">{data ? data.houseLoad : '---'}</p>
+              <p className="text-7xl font-black text-gray-900 leading-none tracking-tighter tabular-nums">{data ? data.grid.acPower : '---'}</p>
               <span className="text-2xl font-bold text-gray-300">W</span>
             </div>
             <div className="flex items-center gap-2 mt-4">
               <UtilityPole size={16} className="text-blue-500" />
-              <span className="text-sm font-black text-gray-900 uppercase tracking-widest">Net: {data ? data.gridTotal + 'W' : '--W'}</span>
+              <span className="text-sm font-black text-gray-900 uppercase tracking-widest">Net: {data ? data.grid.total + 'W' : '--W'}</span>
             </div>
           </div>
-          <div className="space-y-5 border-l border-gray-100 pl-4">
+          <div className="space-y-5 sleeper-l border-gray-100 pl-4 border-l">
             <div className="flex items-center gap-4">
               <Sun size={24} className="text-amber-400" />
-              <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.solarTotal + 'W' : '--W'}</span>
+              <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.solar.total + 'W' : '--W'}</span>
             </div>
             <div className="flex items-center gap-4">
               <BatteryIcon size={24} className={batteryIconColor} />
               <div className="flex items-center gap-2">
-                <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.batteryPower + 'W' : '--W'}</span>
+                <span className="text-2xl font-black text-gray-800 tabular-nums">{data ? data.battery.power + 'W' : '--W'}</span>
               </div>
             </div>
             <div className="flex items-center gap-4">
               {isDcLoading ? (
                 <>
                   <Zap size={24} className="text-emerald-500" />
-                  <span className="text-2xl font-black text-gray-800 tabular-nums">{data.dcPower}W</span>
+                  <span className="text-2xl font-black text-gray-800 tabular-nums">{data?.grid.dcPower}W</span>
                 </>
               ) : isEvCharging ? (
                 <>
                   <Car size={24} className="text-blue-500" />
-                  <span className="text-2xl font-black text-gray-800 tabular-nums">{data.evPower}W</span>
+                  <span className="text-2xl font-black text-gray-800 tabular-nums">{data?.ev.power}W</span>
                 </>
               ) : (
                 <>
@@ -867,21 +1449,21 @@ const EnergyWidget = ({ data, error, onClick }: { data: EnergyData | null, error
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Batterij</span>
             <div className="flex items-center gap-3">
               <div className="w-2.5 h-5 border-2 border-emerald-400 rounded-[2px] relative flex items-end">
-                <div className="w-full bg-emerald-400" style={{ height: (data?.soc || 0) + '%' }} />
+                <div className="w-full bg-emerald-400" style={{ height: (data?.battery.soc || 0) + '%' }} />
               </div>
-              <span className="text-2xl font-black text-gray-900 tabular-nums">{data ? data.soc + '%' : '--%'}</span>
+              <span className="text-2xl font-black text-gray-900 tabular-nums">{data ? data.battery.soc + '%' : '--%'}</span>
             </div>
           </div>
           <div />
           <div className="flex flex-col gap-2 text-right items-end">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Zon Forecast</span>
             <div className="flex items-center justify-end gap-2">
-              <span className={'text-2xl font-black tabular-nums text-gray-900'}>{data ? Math.round(data.forecastPrediction) + ' kWh' : '--'}</span>
+              <span className={'text-2xl font-black tabular-nums text-gray-900'}>{data ? Math.round(data.forecast.prediction) + ' kWh' : '--'}</span>
             </div>
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 };
 
@@ -901,6 +1483,8 @@ const App: React.FC = () => {
   const [isEnergyOpen, setIsEnergyOpen] = useState(false);
   const [energyData, setEnergyData] = useState<EnergyData | null>(null);
   const [energyError, setEnergyError] = useState<string | null>(null);
+  const [energyLogs, setEnergyLogs] = useState<LogEntry[]>([]);
+  const [showEnergyLogs, setShowEnergyLogs] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [spotifyConfig, setSpotifyConfig] = useState<SpotifyConfig | null>(null);
   const tokenClientRef = useRef<any>(null);
@@ -927,6 +1511,11 @@ const App: React.FC = () => {
 
   const toggleFullScreen = () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); };
 
+  const addEnergyLog = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString('nl-BE', { hour12: false });
+    setEnergyLogs(prev => [{ timestamp, msg, type }, ...prev].slice(0, 100));
+  };
+
   useEffect(() => {
     const clockTimer = setInterval(() => setCurrentDate(new Date()), 1000);
     const fullscreenHandler = () => setIsFullscreen(!!document.fullscreenElement);
@@ -952,8 +1541,14 @@ const App: React.FC = () => {
         }
       } else { setTimeout(initGsi, 500); }
     };
-    initGsi(); startEnergySync(); if (!weatherData) fetchWeatherForecast(false);
-    return () => { clearInterval(clockTimer); document.removeEventListener('fullscreenchange', fullscreenHandler); };
+    initGsi(); 
+    const energyTimer = startEnergySync(); 
+    if (!weatherData) fetchWeatherForecast(false);
+    return () => { 
+      clearInterval(clockTimer); 
+      clearInterval(energyTimer);
+      document.removeEventListener('fullscreenchange', fullscreenHandler); 
+    };
   }, []);
 
   const refreshAllUserData = async (token: string) => {
@@ -970,7 +1565,7 @@ const App: React.FC = () => {
   const fetchCalendarEvents = async (token: string) => { 
     setAgendaLoading(true); 
     try { 
-      const now = new Date(); const start = new Date(now); start.setHours(0,0,0,0); const end = new Date(now); end.setDate(now.getDate() + 30); 
+      const now = new Date(); const start = new Date(now); start.setHours(0,0,0,0); const end = new Date(now); end.setDate(now.getDate() + 100); 
       const resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=' + start.toISOString() + '&timeMax=' + end.toISOString() + '&singleEvents=true&orderBy=startTime', { headers: { Authorization: 'Bearer ' + token } });
       const data = await resp.json(); 
       if (data.items) { 
@@ -983,7 +1578,6 @@ const App: React.FC = () => {
           
           let displayTitle = event.summary || '(Geen titel)';
           if (!isAllDay) {
-            // Regex om redundante tijdaanduidingen zoals "12u30-16u30", "14u", "14:00", etc. uit de titel te verwijderen
             displayTitle = displayTitle
               .replace(/\s*\d{1,2}[u:]\d{0,2}\s*-\s*\d{1,2}[u:]\d{0,2}/gi, '')
               .replace(/\s*\d{1,2}[u:]\d{2}/gi, '')
@@ -1013,12 +1607,14 @@ const App: React.FC = () => {
       const searchResp = await fetch("https://www.googleapis.com/drive/v3/files?q=name='WalboFamiilyConfig.txt' and trashed=false", {
         headers: { Authorization: 'Bearer ' + token }
       });
+      if (!searchResp.ok) return;
       const searchData = await searchResp.json();
       if (searchData.files && searchData.files.length > 0) {
         const fileId = searchData.files[0].id;
         const fileResp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
           headers: { Authorization: 'Bearer ' + token }
         });
+        if (!fileResp.ok) return;
         const configData = await fileResp.json();
         if (configData?.connections?.spotify) {
           setSpotifyConfig({
@@ -1041,7 +1637,59 @@ const App: React.FC = () => {
       localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(newWeatherData));
     } catch (e) { console.error(e); } finally { setWeatherLoading(false); } 
   }
-  const startEnergySync = () => { setInterval(async () => { try { const resp = await fetch(ENERGY_ENDPOINT); const data = await resp.json(); setEnergyData({ houseLoad: data.grid?.ac_power?.value || 0, evPower: data.ev?.current_power?.value || 0, evChargedToday: data.ev?.charged_today?.value || 0, evChargedMonth: data.ev?.charged_month?.value || 0, evTotalCounter: data.ev?.total_counter?.value || 0, evStatus: data.ev?.status?.value || 'Idle', solarTotal: data.solar?.total_power?.value || 0, solarAC: data.solar?.ac_pv_power?.value || 0, solarDC: data.solar?.dc_pv_power?.value || 0, solarDCDay: data.solar?.dc_pv_total?.value || 0, solarACDay: data.solar?.ac_pv_totalday?.value || 0, solarTotalDay: data.solar?.total_powerday?.value || 0, gridTotal: data.grid?.total_power?.value || 0, gridSetpoint: data.grid?.setpoint?.value || 0, dcPower: data.grid?.dc_power?.value || 0, soc: data.battery?.soc?.value || 0, batteryStatus: data.battery?.status?.value || 'Idle', batteryPower: data.battery?.power?.value || 0, forecastPrediction: parseFloat(data.forecast?.prediction?.value || "0"), forecastSummary: data.forecast?.summary?.value || 'Laden...', timestamp: new Date().toISOString() }); setEnergyError(null); } catch (e) { setEnergyError("Geen verbinding"); } }, 2000); };
+  
+  const startEnergySync = () => { 
+    return setInterval(async () => { 
+      try { 
+        const resp = await fetch(ENERGY_ENDPOINT); 
+        if (!resp.ok) throw new Error(`Status: ${resp.status}`);
+        const raw = await resp.json(); 
+        setEnergyData({ 
+          ev: {
+            power: raw.ev.current_power.value,
+            chargedToday: raw.ev.charged_today.value,
+            chargedMonth: raw.ev.charged_month.value,
+            totalCounter: raw.ev.total_counter.value,
+            startDay: raw.ev.start_day.value,
+            startMonth: raw.ev.start_month.value,
+            status: raw.ev.status.value
+          },
+          solar: {
+            total: raw.solar.total_power.value,
+            ac: raw.solar.ac_pv_power.value,
+            dc: raw.solar.dc_pv_power.value,
+            dcTotalDay: raw.solar.dc_pv_total.value,
+            acTotalDay: raw.solar.ac_pv_totalday.value,
+            totalDay: raw.solar.total_powerday.value
+          },
+          grid: {
+            total: raw.grid.total_power.value,
+            setpoint: raw.grid.setpoint.value,
+            acPower: raw.grid.ac_power.value,
+            dcPower: raw.grid.dc_power.value
+          },
+          battery: {
+            soc: raw.battery.soc.value,
+            status: raw.battery.status.value,
+            power: raw.battery.power.value
+          },
+          forecast: {
+            prediction: parseFloat(raw.forecast.prediction.value),
+            summary: raw.forecast.summary.value
+          },
+          meta: {
+            timestamp: raw.meta.timestamp,
+            system: raw.meta.system
+          }
+        }); 
+        setEnergyError(null); 
+        addEnergyLog("Data succesvol opgehaald van " + ENERGY_ENDPOINT, "success");
+      } catch (e: any) { 
+        setEnergyError("Geen verbinding"); 
+        addEnergyLog("Fetch fout: " + e.message, "error");
+      } 
+    }, 2000); 
+  };
 
   return (
     <div className="min-h-screen w-full bg-[#fcfcfc] flex flex-col animate-in fade-in">
@@ -1069,12 +1717,59 @@ const App: React.FC = () => {
           )}
         </section>
         <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar">
-          <EnergyWidget data={energyData} error={energyError} onClick={() => setIsEnergyOpen(true)} />
+          <EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} apiUrl={ENERGY_ENDPOINT} />
           <TimerWidget />
           <GeminiAssistantWidget />
-          <SpotifyWidget config={spotifyConfig} />
+          <SpotifyWidget config={spotifyConfig} accessToken={accessToken} onRefreshConfig={() => accessToken && fetchSpotifyConfig(accessToken)} />
         </aside>
       </main>
+
+      {/* Energy Logs Overlay */}
+      {showEnergyLogs && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center animate-in fade-in bg-black/80 backdrop-blur-md p-10">
+          <div className="bg-[#1a1a1a] w-full max-w-4xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center">
+              <div className="flex items-center gap-4 text-emerald-400">
+                <Zap size={24} />
+                <h3 className="font-black text-xs uppercase tracking-[0.4em]">Energy System Logs</h3>
+              </div>
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => { const text = energyLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} 
+                  className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"
+                >
+                  <Copy size={18} />
+                </button>
+                <button onClick={() => setEnergyLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all">
+                  <Trash2 size={18} />
+                </button>
+                <button onClick={() => setShowEnergyLogs(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            <div className="p-4 bg-emerald-500/5 border-b border-white/5 flex items-center justify-between px-8">
+               <span className="text-[10px] font-bold text-emerald-500/60 uppercase tracking-widest">End-point: {ENERGY_ENDPOINT}</span>
+               <a href={ENERGY_ENDPOINT} target="_blank" rel="noreferrer" className="text-[10px] font-black text-emerald-400 uppercase tracking-widest hover:underline flex items-center gap-2">Test URL <ExternalLink size={10} /></a>
+            </div>
+            <div className="flex-1 overflow-y-auto p-8 space-y-2 font-mono text-[11px] scroll-smooth no-scrollbar">
+              {energyLogs.length === 0 ? ( 
+                <div className="h-full flex flex-col items-center justify-center opacity-20 text-white font-black uppercase tracking-[0.3em] gap-4">
+                  <Activity size={48} className="animate-pulse" />
+                  Wachten op data...
+                </div> 
+              ) : energyLogs.map((log, i) => ( 
+                <div key={i} className={`flex gap-4 border-b border-white/5 pb-2 last:border-0 ${log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}`}>
+                  <span className="opacity-40 whitespace-nowrap">[{log.timestamp}]</span>
+                  <span className="font-bold whitespace-nowrap uppercase">[{log.type}]</span>
+                  <span className="text-white opacity-80 break-all">{log.msg}</span>
+                </div> 
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {isWeatherOpen && <WeatherOverlay onClose={() => setIsWeatherOpen(false)} weatherData={weatherData} loading={weatherLoading} />}
       {isEnergyOpen && <EnergyOverlay data={energyData} onClose={() => setIsEnergyOpen(false)} />}
     </div>
