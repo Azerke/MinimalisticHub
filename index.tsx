@@ -12,7 +12,7 @@ import {
   Mic, MicOff, AlertTriangle, ExternalLink, LogOut, Globe,
   Music, SkipBack, Play, SkipForward, Pause, Volume2, Plus, Settings, Key,
   TrendingUp, Activity, History, Save,
-  Recycle, Package, FileText, ChevronRight
+  Recycle, Package, FileText, ChevronRight, Wine
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
@@ -20,7 +20,7 @@ import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
 const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
-const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/page1';
+const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
 
 const WEATHER_CACHE_KEY = 'hub_weather_cache';
@@ -454,170 +454,29 @@ const TimerWidget = () => {
   );
 };
 
-const EnergyOverlay = ({ data, onClose }: { data: EnergyData | null, onClose: () => void }) => {
-  const [showNodeRed, setShowNodeRed] = useState(false);
-  if (!data) return null;
-
-  const StatBlock = ({ label, value, unit, description, colorClass = "text-gray-900" }: { label: string, value: string | number, unit: string, description?: string, colorClass?: string }) => (
-    <div className="bg-gray-50/50 p-6 rounded-3xl border border-gray-100 hover:bg-white hover:shadow-md transition-all">
-      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{label}</p>
-      <div className="flex items-baseline gap-1.5">
-        <p className={`text-3xl font-black tracking-tight tabular-nums ${colorClass}`}>{value}</p>
-        <span className="text-sm font-bold text-gray-300">{unit}</span>
-      </div>
-      {description && <p className="text-[9px] font-bold text-gray-300 uppercase mt-2 tracking-wider leading-tight">{description}</p>}
-    </div>
-  );
-
+const EnergyOverlay = ({ onClose }: { onClose: () => void }) => {
   return (
-    <div className="absolute inset-0 z-[250] flex items-center justify-center animate-in fade-in duration-300">
-      <div className="absolute inset-0 bg-white/60 backdrop-blur-[100px]" onClick={onClose} />
-      <div className="relative w-full h-full bg-white/40 shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="p-8 flex justify-between items-center bg-white/20 backdrop-blur-xl shrink-0 border-b border-white/40">
-          <div className="flex items-center gap-8">
-            <button onClick={() => setShowNodeRed(true)} className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center shadow-lg border border-emerald-400 text-emerald-600 hover:scale-105 transition-transform active:scale-95">
-              <Zap size={32} fill="currentColor" />
-            </button>
-            <div>
-              <h3 className="text-3xl font-black text-gray-900 tracking-tight">Energie Monitor</h3>
-              <div className="flex items-center gap-3 mt-1">
-                <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest flex items-center gap-1.5">
-                  <Activity size={10} /> {data.meta.system}
-                </span>
-                <div className="w-1 h-1 bg-gray-200 rounded-full" />
-                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-                  Laatste update: {new Date(data.meta.timestamp).toLocaleTimeString('nl-BE')}
-                </span>
-              </div>
-            </div>
+    <div className="fixed inset-0 z-[500] flex flex-col bg-white animate-in fade-in duration-300">
+      <div className="p-6 flex justify-between items-center bg-white border-b border-gray-200 shrink-0">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center shadow-sm border border-emerald-100">
+            <Zap size={24} fill="currentColor" />
           </div>
-          <button onClick={onClose} className="w-16 h-16 flex items-center justify-center bg-gray-900 hover:bg-black rounded-[2rem] transition-all text-white shadow-2xl active:scale-90 group">
-            <X className="w-8 h-8 group-hover:rotate-90 transition-transform" />
-          </button>
+          <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">Energie Dashboard</h3>
         </div>
-
-        {showNodeRed && ( 
-          <div className="absolute inset-0 z-[300] bg-[#f0f0f0] flex flex-col animate-in slide-in-from-bottom-8">
-            <div className="p-6 flex justify-between items-center bg-white border-b border-gray-200">
-              <div className="flex items-center gap-4"><LayoutDashboard className="text-emerald-500" /><span className="font-black text-sm uppercase tracking-widest">Node-RED Full Control</span></div>
-              <button onClick={() => setShowNodeRed(false)} className="px-6 py-2 bg-gray-900 text-white rounded-xl text-xs font-black uppercase tracking-widest">Sluiten</button>
-            </div>
-            <iframe src={NODERED_DASHBOARD} className="flex-1 w-full border-none" />
-          </div> 
-        )}
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto no-scrollbar grid grid-cols-1 lg:grid-cols-2 gap-px bg-white/10 p-1">
-          
-          {/* Section: Solar */}
-          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-b border-r border-white/20">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] font-black text-amber-600 uppercase tracking-[0.4em] flex items-center gap-2">
-                <Sun size={16} /> Solar Generation
-              </span>
-              <div className="px-4 py-1.5 bg-amber-50 border border-amber-100 rounded-full text-[10px] font-black text-amber-700 uppercase tracking-widest">
-                {data.solar.total}W Current
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <StatBlock label="Grid Connected (AC)" value={data.solar.ac} unit="W" description="AC PV System Output" colorClass="text-amber-600" />
-              <StatBlock label="DC Connected (DC)" value={data.solar.dc} unit="W" description="DC MPPT Output" colorClass="text-amber-600" />
-              <StatBlock label="Day Total (AC)" value={data.solar.acTotalDay} unit="kWh" description="Grid System Total Today" />
-              <StatBlock label="Day Total (DC)" value={data.solar.dcTotalDay} unit="W" description="DC MPPT Total Today" />
-              <StatBlock label="Combined Day Total" value={data.solar.totalDay} unit="kWh" description="Full PV Yield Today" colorClass="text-emerald-600" />
-              <div className="bg-blue-600 rounded-3xl p-6 text-white shadow-xl flex flex-col justify-center relative overflow-hidden">
-                <Sparkles className="absolute -right-4 -bottom-4 w-24 h-24 opacity-10" />
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 mb-2">Solar Forecast</p>
-                <div className="flex items-baseline gap-1.5">
-                  <p className="text-4xl font-black">{data.forecast.prediction}</p>
-                  <span className="text-sm font-bold opacity-40">kWh</span>
-                </div>
-                <p className="text-[9px] font-bold uppercase mt-3 tracking-widest opacity-80 sleeper-snug leading-snug">{data.forecast.summary}</p>
-              </div>
-            </div>
-          </section>
-
-          {/* Section: Battery */}
-          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-b border-white/20">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] font-black text-emerald-600 uppercase tracking-[0.4em] flex items-center gap-2">
-                <BatteryIcon size={16} /> Energy Storage
-              </span>
-              <div className={`px-4 py-1.5 border rounded-full text-[10px] font-black uppercase tracking-widest ${data.battery.status.toLowerCase() === 'opladen' ? 'bg-emerald-500 border-emerald-400 text-white' : 'bg-orange-100 border-orange-200 text-orange-700'}`}>
-                {data.battery.status}
-              </div>
-            </div>
-
-            <div className="flex gap-10 items-center bg-white/60 p-8 rounded-[3rem] border border-white">
-              <VisualBattery soc={data.battery.soc} status={data.battery.status} />
-              <div className="flex-1 grid grid-cols-1 gap-4">
-                <StatBlock label="Current Power" value={data.battery.power} unit="W" description="Charging/Discharging Rate" />
-                <StatBlock label="State of Charge" value={data.battery.soc} unit="%" description="Available Capacity" colorClass="text-emerald-600" />
-              </div>
-            </div>
-          </section>
-
-          {/* Section: Grid & House */}
-          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-r border-white/20">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] font-black text-blue-600 uppercase tracking-[0.4em] flex items-center gap-2">
-                <UtilityPole size={16} /> Power Consumption
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <StatBlock label="House Load (AC)" value={data.grid.acPower} unit="W" description="Total domestic power use" colorClass="text-gray-900" />
-              <StatBlock label="Grid Connection" value={data.grid.total} unit="W" description="Net Import/Export" colorClass={data.grid.total > 0 ? "text-rose-500" : "text-emerald-500"} />
-              <StatBlock label="Grid Setpoint" value={data.grid.setpoint} unit="W" description="Inverter target setpoint" />
-              <StatBlock label="Extra DC Load" value={data.grid.dcPower} unit="W" description="DC Charger/Load presence" />
-            </div>
-          </section>
-
-          {/* Section: EV Charger */}
-          <section className="bg-white/40 backdrop-blur-md p-10 space-y-8 border-white/20">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] font-black text-blue-500 uppercase tracking-[0.4em] flex items-center gap-2">
-                <Car size={16} /> Kia EV9 Charger
-              </span>
-              <div className={`px-4 py-1.5 border rounded-full text-[10px] font-black uppercase tracking-widest ${data.ev.power > 100 ? 'bg-blue-600 border-blue-500 text-white animate-pulse' : 'bg-gray-100 border-gray-200 text-gray-500'}`}>
-                {data.ev.status}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2 bg-blue-50/50 p-8 rounded-[2.5rem] border border-blue-100 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Current Charging Power</p>
-                  <div className="flex items-baseline gap-2">
-                    <p className="text-5xl font-black text-blue-600 tabular-nums">{data.ev.power}</p>
-                    <span className="text-xl font-bold text-blue-300">W</span>
-                  </div>
-                </div>
-                <Car size={48} className="text-blue-200" />
-              </div>
-              <StatBlock label="Today" value={data.ev.chargedToday} unit="kWh" description="Energy delivered today" />
-              <StatBlock label="This Month" value={data.ev.chargedMonth} unit="kWh" description="Energy delivered this month" />
-              <StatBlock label="Start Day" value={data.ev.startDay} unit="kWh" description="Reading at 00:00" />
-              <StatBlock label="Start Month" value={data.ev.startMonth} unit="kWh" description="Reading at month start" />
-              <div className="col-span-2 bg-gray-900 rounded-3xl p-6 flex items-center justify-between group overflow-hidden relative">
-                <History className="absolute -left-4 -bottom-4 w-24 h-24 text-white/5 group-hover:scale-110 transition-transform" />
-                <div className="relative z-10">
-                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Lifetime Counter</p>
-                   <div className="flex items-baseline gap-1.5">
-                    <p className="text-3xl font-black text-white tabular-nums">{data.ev.totalCounter}</p>
-                    <span className="text-sm font-bold text-gray-500">kWh</span>
-                  </div>
-                </div>
-                <div className="text-right opacity-40">
-                  <TrendingUp size={24} className="text-white" />
-                </div>
-              </div>
-            </div>
-          </section>
-
-        </div>
+        <button 
+          onClick={onClose} 
+          className="w-14 h-14 flex items-center justify-center bg-gray-900 text-white rounded-[1.5rem] hover:bg-black transition-all shadow-xl active:scale-90"
+        >
+          <X size={28} />
+        </button>
+      </div>
+      <div className="flex-1 w-full bg-[#f0f0f0] overflow-hidden relative">
+        <iframe 
+          src={NODERED_DASHBOARD} 
+          className="w-full h-full border-none" 
+          title="Node-RED Dashboard"
+        />
       </div>
     </div>
   );
@@ -981,7 +840,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
     setSelectedTimezone(prev => prev === 'UTC' ? 'Europe/Brussels' : 'UTC');
   };
 
-  const isWaste = (title: string) => ['PMD', 'RA', 'P/K'].includes(title.trim().toUpperCase());
+  const isWaste = (title: string) => ['PMD', 'RA', 'P/K', 'GLA'].includes(title.trim().toUpperCase());
 
   const currentLabel = useMemo(() => {
     if (selectedWeekType === 'rolling') return 'Komende 7 dagen';
@@ -1089,6 +948,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                               if (t === 'PMD') return <Recycle key={w.id} size={20} className="text-blue-500" strokeWidth={2.5} />;
                               if (t === 'RA') return <Trash2 key={w.id} size={20} className="text-gray-400" strokeWidth={2.5} />;
                               if (t === 'P/K') return <Package key={w.id} size={20} className="text-amber-500" strokeWidth={2.5} />;
+                              if (t === 'GLA') return <Wine key={w.id} size={20} className="text-blue-600" strokeWidth={2.5} />;
                               return null;
                             })}
                           </div>
@@ -1233,7 +1093,7 @@ const SpotifyWidget = ({ config, accessToken, onRefreshConfig }: { config: Spoti
          <div className="w-40 h-40 bg-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl transition-transform group-hover:scale-105 duration-500">
            <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=400&auto=format&fit=crop" alt="Album Art" className="w-full h-full object-cover" />
          </div>
-         <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg">
+         <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-white shadow-lg">
            <Volume2 size={16} />
          </div>
       </div>
@@ -1372,7 +1232,7 @@ const SpotifyWidget = ({ config, accessToken, onRefreshConfig }: { config: Spoti
   );
 };
 
-const EnergyWidget = ({ data, error, onTitleClick, apiUrl }: { data: EnergyData | null, error: string | null, onTitleClick: () => void, apiUrl: string }) => {
+const EnergyWidget = ({ data, error, onTitleClick, onWidgetClick, apiUrl }: { data: EnergyData | null, error: string | null, onTitleClick: () => void, onWidgetClick: () => void, apiUrl: string }) => {
   const isEvCharging = data && data.ev.power > 100;
   const isDcLoading = data && data.grid.dcPower > 100;
   const batteryStatus = data ? data.battery.status : '';
@@ -1380,13 +1240,20 @@ const EnergyWidget = ({ data, error, onTitleClick, apiUrl }: { data: EnergyData 
                           batteryStatus.toLowerCase() === 'ontladen' ? "text-rose-500" : "text-gray-400";
   
   return (
-    <div className="w-full p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 text-left hover:border-emerald-400 hover:shadow-xl transition-all overflow-hidden relative group">
+    <div 
+      onClick={onWidgetClick}
+      className="w-full p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 text-left hover:border-emerald-400 hover:shadow-xl transition-all overflow-hidden relative group cursor-pointer"
+    >
       <div className="flex justify-between items-center mb-6">
-        <button onClick={onTitleClick} className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-emerald-500 transition-colors">
+        <button 
+          onClick={(e) => { e.stopPropagation(); onTitleClick(); }} 
+          className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-emerald-500 transition-colors"
+        >
           <Zap size={10} className="text-emerald-500" /> Energie Status <FileText size={10} className="opacity-40" />
         </button>
         {error ? (
           <a 
+            onClick={(e) => e.stopPropagation()}
             href={apiUrl} 
             target="_blank" 
             rel="noreferrer" 
@@ -1717,7 +1584,7 @@ const App: React.FC = () => {
           )}
         </section>
         <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar">
-          <EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} apiUrl={ENERGY_ENDPOINT} />
+          <EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={ENERGY_ENDPOINT} />
           <TimerWidget />
           <GeminiAssistantWidget />
           <SpotifyWidget config={spotifyConfig} accessToken={accessToken} onRefreshConfig={() => accessToken && fetchSpotifyConfig(accessToken)} />
@@ -1771,7 +1638,7 @@ const App: React.FC = () => {
       )}
 
       {isWeatherOpen && <WeatherOverlay onClose={() => setIsWeatherOpen(false)} weatherData={weatherData} loading={weatherLoading} />}
-      {isEnergyOpen && <EnergyOverlay data={energyData} onClose={() => setIsEnergyOpen(false)} />}
+      {isEnergyOpen && <EnergyOverlay onClose={() => setIsEnergyOpen(false)} />}
     </div>
   );
 };
