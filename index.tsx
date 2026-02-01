@@ -13,7 +13,8 @@ import {
   Music, SkipBack, Play, SkipForward, Pause, Volume2, Plus, Settings, Key,
   TrendingUp, Activity, History, Save,
   Recycle, Package, FileText, ChevronRight, Wine,
-  Pizza, CookingPot, Utensils, Drumstick, Soup, Beef, ChefHat, Sandwich
+  Pizza, CookingPot, Utensils, Drumstick, Soup, Beef, ChefHat, Sandwich,
+  Fish, Salad
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
@@ -33,7 +34,10 @@ const GOOGLE_COLOR_MAP: Record<string, string> = {
   "6": "#f4511e", "7": "#039be5", "8": "#616161", "9": "#3f51b5", "10": "#0b8043", "11": "#d50000",
 };
 
-const FOOD_OPTIONS = ['Pizza', 'Friet', 'Taco', 'Tortilla', 'Rijst', 'Kip', 'Spek', 'Spaghetti'];
+const FOOD_OPTIONS = [
+  'Pizza', 'Friet', 'Taco', 'Tortilla', 
+  'Spaghetti', 'Spinazie Spek', 'Kip Rijst', 'Croque', 'Sushi'
+];
 
 interface AgendaItem {
   id: string; 
@@ -791,6 +795,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   const [selectedWeekType, setSelectedWeekType] = useState<'rolling' | Date>('rolling');
   const [activeFoodAdd, setActiveFoodAdd] = useState<string | null>(null);
   const [isAddingFood, setIsAddingFood] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<AgendaItem | null>(null);
 
   const weekOptions = useMemo(() => {
     const options: { type: 'rolling' | Date; label: string }[] = [{ type: 'rolling', label: 'Komende 7 dagen' }];
@@ -852,13 +857,14 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   const getFoodIcon = (title: string) => {
     const t = title.toLowerCase();
     if (t.includes('pizza')) return <Pizza size={24} className="text-orange-500" />;
-    if (t.includes('friet')) return <CookingPot size={24} className="text-amber-500" />;
+    if (t.includes('friet')) return <ChefHat size={24} className="text-amber-500" />;
     if (t.includes('taco')) return <ChefHat size={24} className="text-yellow-600" />;
-    if (t.includes('tortilla')) return <Sandwich size={24} className="text-yellow-500" />;
-    if (t.includes('rijst')) return <Soup size={24} className="text-blue-400" />;
+    if (t.includes('wrap')) return <Sandwich size={24} className="text-yellow-500" />;
+    if (t.includes('spaghetti')) return <Soup size={24} className="text-rose-500" />;
+    if (t.includes('spinazie')) return <Salad size={24} className="text-emerald-500" />;
     if (t.includes('kip')) return <Drumstick size={24} className="text-orange-400" />;
-    if (t.includes('spek')) return <Beef size={24} className="text-rose-400" />;
-    if (t.includes('spaghetti')) return <ChefHat size={24} className="text-gray-500" />;
+    if (t.includes('croque')) return <Sandwich size={24} className="text-amber-600" />;
+    if (t.includes('sushi')) return <Fish size={24} className="text-indigo-400" />;
     return <Utensils size={20} className="text-gray-300" />;
   };
 
@@ -892,6 +898,23 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
     } finally {
       setIsAddingFood(false);
       setActiveFoodAdd(null);
+    }
+  };
+
+  const deleteFoodFromCalendar = async () => {
+    if (!accessToken || !itemToDelete) return;
+    try {
+      const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${itemToDelete.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + accessToken }
+      });
+      if (!resp.ok) throw new Error('Kon item niet verwijderen');
+      onRefresh();
+    } catch (e) {
+      console.error(e);
+      alert('Fout bij verwijderen uit kalender');
+    } finally {
+      setItemToDelete(null);
     }
   };
 
@@ -1047,7 +1070,13 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                           const displayFood = f.title.replace(/^Eten\s+/i, '');
                           return (
                             <div key={f.id} className="flex items-center gap-3 animate-in fade-in slide-in-from-bottom-1">
-                              {getFoodIcon(f.title)}
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setItemToDelete(f); }}
+                                className="hover:scale-110 active:scale-90 transition-transform cursor-pointer"
+                                title="Verwijder dit menu-item"
+                              >
+                                {getFoodIcon(f.title)}
+                              </button>
                               <span className="text-[26px] font-black text-gray-800 tracking-tight leading-none">
                                 {displayFood}
                               </span>
@@ -1064,7 +1093,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                             
                             {activeFoodAdd === dateKey && (
                               <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-amber-100 rounded-2xl shadow-2xl z-50 p-2 animate-in zoom-in-95 fade-in duration-200">
-                                <div className="max-h-48 overflow-y-auto no-scrollbar grid grid-cols-1 gap-1">
+                                <div className="max-h-128 overflow-y-auto no-scrollbar grid grid-cols-1 gap-1">
                                   {FOOD_OPTIONS.map(dish => (
                                     <button
                                       key={dish}
@@ -1091,6 +1120,22 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
             </div> 
           )}
         </div> 
+      )}
+
+      {itemToDelete && (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center animate-in fade-in duration-300 bg-black/60 backdrop-blur-sm p-10">
+          <div className="bg-white w-full max-w-sm p-10 rounded-[3rem] shadow-2xl flex flex-col items-center text-center">
+             <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[1.5rem] flex items-center justify-center mb-8">
+               <Trash2 size={32} />
+             </div>
+             <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest mb-4">Gerecht verwijderen?</h3>
+             <p className="text-sm text-gray-500 mb-10 leading-relaxed font-medium">Weet je zeker dat je <strong>{itemToDelete.title.replace(/^Eten\s+/i, '')}</strong> wilt verwijderen van de kalender?</p>
+             <div className="flex gap-4 w-full">
+                <button onClick={() => setItemToDelete(null)} className="flex-1 py-5 bg-gray-50 text-gray-400 hover:bg-gray-100 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Annuleren</button>
+                <button onClick={deleteFoodFromCalendar} className="flex-1 py-5 bg-rose-500 text-white hover:bg-rose-600 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-rose-100 transition-all">Verwijderen</button>
+             </div>
+          </div>
+        </div>
       )}
     </div>
   );
