@@ -14,7 +14,7 @@ import {
   TrendingUp, Activity, History, Save,
   Recycle, Package, FileText, ChevronRight, Wine,
   Pizza, CookingPot, Utensils, Drumstick, Soup, Beef, ChefHat, Sandwich,
-  Fish, Salad
+  Fish, Salad, Hamburger
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
@@ -35,8 +35,8 @@ const GOOGLE_COLOR_MAP: Record<string, string> = {
 };
 
 const FOOD_OPTIONS = [
-  'Pizza', 'Friet', 'Taco', 'Tortilla', 
-  'Spaghetti', 'Spinazie Spek', 'Kip Rijst', 'Croque', 'Sushi'
+  'Pizza', 'Friet', 'Taco', 'Wrap', 
+  'Spaghetti', 'Spinazie Spek', 'Kip Rijst', 'Croque', 'Sushi','Visburger','Soep'
 ];
 
 interface AgendaItem {
@@ -580,11 +580,90 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   const [isPicking, setIsPicking] = useState(false);
   const [showPhotosLog, setShowPhotosLog] = useState(false);
   const [photosLogs, setPhotosLogs] = useState<LogEntry[]>([]);
+  const hasHydratedRef = useRef(false);
 
   const addLog = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
     const timestamp = new Date().toLocaleTimeString('nl-BE', { hour12: false });
     setPhotosLogs(prev => [...prev, { timestamp, msg, type }].slice(-100));
   };
+
+  const extractUri = (item: any) => {
+    // The Google Photos Picker API returns baseUrl inside mediaFile object
+    const uri = item.mediaFile?.baseUrl || 
+           item.mediaFileUri || 
+           item.previewUri || 
+           item.mediaItem?.mediaFile?.baseUrl ||
+           item.mediaItem?.mediaFileUri || 
+           item.mediaItem?.previewUri || 
+           item.baseUrl;
+    
+    if (!uri) {
+      console.error('Could not extract URI from item:', item);
+    }
+    
+    return uri;
+  };
+
+  const extractFilename = (item: any) => {
+    return item.mediaFile?.filename || 
+           item.filename || 
+           item.mediaItem?.mediaFile?.filename || 
+           item.preview?.filename || 
+           "Gekozen foto";
+  };
+
+  const fetchImageAsBlobUrl = async (uri: string) => {
+    if (!accessToken) throw new Error("Geen access token");
+    
+    // Google Photos baseUrl supports size/quality parameters
+    // Format: baseUrl=w<width>-h<height> for specific dimensions
+    // Or: baseUrl=s<size> for max dimension, or =d for original
+    // We'll request high quality: original size with =d, or large size like =w3840-h2160
+    let finalUri = uri;
+    if (uri.includes('googleusercontent.com')) {
+      // Request original quality (full resolution)
+      finalUri = uri + '=d';
+      // Alternative for large but not original: finalUri = uri + '=w3840-h2160';
+    }
+    
+    const response = await fetch(finalUri, {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    if (blob.size < 100) throw new Error("Onvoldoende data in blob");
+    return URL.createObjectURL(blob);
+  };
+
+  // Hydration effect: Re-fetch blobs for cached items when we have a token
+  useEffect(() => {
+    const hydrateCachedPhotos = async () => {
+      if (!accessToken || photos.length === 0 || hasHydratedRef.current) return;
+      
+      const needsHydration = photos.some(p => !p.blobUrl);
+      if (needsHydration) {
+        hasHydratedRef.current = true;
+        addLog("Bezig met herladen van foto-inhoud uit cache...", 'info');
+        
+        const hydrated = await Promise.all(photos.map(async (photo) => {
+          if (photo.blobUrl) return photo;
+          try {
+            const uri = extractUri(photo);
+            if (!uri) throw new Error("Geen bron URI beschikbaar");
+            const blobUrl = await fetchImageAsBlobUrl(uri);
+            return { ...photo, blobUrl, expired: false };
+          } catch (e: any) {
+            addLog(`Fout bij herladen ${photo.filename || 'item'}: ${e.message}`, 'error');
+            return { ...photo, blobUrl: null, expired: true };
+          }
+        }));
+        
+        setPhotos(hydrated);
+      }
+    };
+
+    hydrateCachedPhotos();
+  }, [accessToken, photos.length]);
 
   const createPickerSession = async () => {
     if (!accessToken) return;
@@ -640,16 +719,40 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         headers: { Authorization: 'Bearer ' + accessToken }
       });
       const data = await response.json();
-      if (data.mediaItems) {
-        addLog(`${data.mediaItems.length} media items opgehaald.`, 'success');
-        const validItems = data.mediaItems.filter((item: any) => item.mediaFileUri || item.previewUri);
-        addLog(`${validItems.length} geldige items na filtering.`, 'info');
+      
+      if (data.mediaItems && data.mediaItems.length > 0) {
+        addLog(`${data.mediaItems.length} media items gevonden. Downloaden...`, 'info');
+
+        // Fetch each image as a blob with auth
+        const processedItems = await Promise.all(data.mediaItems.map(async (item: any) => {
+          try {
+            const uri = extractUri(item);
+            if (!uri) throw new Error("Item heeft geen media URI");
+            
+            const filename = extractFilename(item);
+            const blobUrl = await fetchImageAsBlobUrl(uri);
+            
+            return { 
+              ...item, 
+              filename,
+              blobUrl, 
+              expired: false 
+            };
+          } catch (e: any) {
+            addLog(`Download fout: ${e.message}`, 'error');
+            return null;
+          }
+        }));
+
+        const finalItems = processedItems.filter(item => item !== null);
+        addLog(`${finalItems.length} media items succesvol verwerkt.`, 'success');
         
-        const newPhotos = [...photos, ...validItems];
+        const newPhotos = [...photos, ...finalItems];
         setPhotos(newPhotos);
-        localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos));
+        // Persist metadata to localStorage, but strip blobUrl (it's session-local)
+        localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos.map(({blobUrl, ...rest}) => rest)));
       } else {
-        addLog(`Geen media items gevonden in response: ${JSON.stringify(data)}`, 'error');
+        addLog(`Geen media items gevonden in response of lijst is leeg.`, 'error');
       }
     } catch (e: any) {
       addLog(`Fetch Items Error: ${e.message}`, 'error');
@@ -658,9 +761,13 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
   const clearSlideshow = () => {
     addLog("Slideshow gewist.", 'info');
+    photos.forEach(photo => {
+      if (photo.blobUrl) URL.revokeObjectURL(photo.blobUrl);
+    });
     setPhotos([]);
     localStorage.removeItem(PHOTOS_CACHE_KEY);
     setCurrentIndex(0);
+    hasHydratedRef.current = false;
   };
 
   useEffect(() => {
@@ -705,31 +812,50 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
     </div>
   );
 
+  const allExpired = photos.length > 0 && photos.every(p => p.expired);
+
   return (
     <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden relative group">
-      {photos.map((photo, idx) => {
-        const imageSource = photo.mediaFileUri || photo.previewUri;
-        if (!imageSource) return null;
-        
-        return (
-          <div 
-            key={photo.id + idx} 
-            className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100' : 'opacity-0'}`}
-          >
-            <img 
-              src={imageSource} 
-              alt={photo.filename || ""} 
-              className="w-full h-full object-cover" 
-              onError={() => addLog(`Fout bij laden van foto: ${photo.filename}`, 'error')}
-              onLoad={() => idx === currentIndex && addLog(`Foto geladen: ${photo.filename}`, 'info')}
-            />
+      <div className="absolute inset-0 rounded-[3rem] overflow-hidden">
+        {allExpired ? (
+          <div className="h-full flex flex-col items-center justify-center text-center px-10">
+            <ShieldAlert size={48} className="text-rose-400 mb-4" />
+            <h3 className="text-white text-lg font-black uppercase tracking-widest mb-2">Sessie Verloopen</h3>
+            <p className="text-gray-400 text-xs mb-8">De tijdelijke Google URIs zijn verlopen of ongeldig. Kies opnieuw foto's.</p>
+            <button onClick={createPickerSession} className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">
+              Opnieuw Kiezen
+            </button>
           </div>
-        );
-      })}
+        ) : (
+          photos.map((photo, idx) => {
+            if (!photo.blobUrl) return null;
+            
+            return (
+              <div 
+                key={photo.id + idx} 
+                className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
+              >
+                <img 
+                  src={photo.blobUrl} 
+                  alt={photo.filename || ""} 
+                  className="w-full h-full object-cover" 
+                  onError={() => {
+                    addLog(`Laadfout voor ${photo.filename}`, 'error');
+                  }}
+                  onLoad={() => {
+                    if (idx === currentIndex) addLog(`Zichtbaar: ${photo.filename}`, 'success');
+                  }}
+                />
+              </div>
+            );
+          })
+        )}
+      </div>
       
-      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10 pointer-events-none" />
+      {/* Overlay controls and metadata */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10 pointer-events-none z-20" />
       
-      <div className="absolute top-10 right-10 flex gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-10 right-10 flex gap-4 opacity-0 group-hover:opacity-100 transition-opacity z-30">
         <button onClick={createPickerSession} className="h-14 px-6 bg-white/20 backdrop-blur-md rounded-2xl flex items-center gap-3 text-white hover:bg-white/40 transition-colors">
           <Plus size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Toevoegen</span>
         </button>
@@ -741,14 +867,17 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         </div>
       </div>
 
-      <div className="absolute bottom-10 left-10 text-white flex flex-col gap-1 z-20">
+      <div className="absolute bottom-10 left-10 text-white flex flex-col gap-1 z-30">
         <button 
           onClick={() => setShowPhotosLog(true)}
-          className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 hover:opacity-100 transition-opacity text-left cursor-help"
+          className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 hover:opacity-100 transition-opacity text-left cursor-help flex items-center gap-2"
         >
-          Slideshow • {photos.length} Foto's
+          <span className={`w-1.5 h-1.5 rounded-full ${allExpired ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+          Slideshow • {photos.length} Foto's {allExpired && "(Verlopen)"}
         </button>
-        <span className="text-xs font-bold truncate max-w-sm pointer-events-none">{photos[currentIndex]?.filename}</span>
+        <span className="text-xs font-bold truncate max-w-sm pointer-events-none">
+          {photos[currentIndex]?.filename || "Laden..."}
+        </span>
       </div>
 
       {showPhotosLog && (
@@ -856,6 +985,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
 
   const getFoodIcon = (title: string) => {
     const t = title.toLowerCase();
+    if (t.includes('burger')) return <Hamburger size={24} className="text-indigo-400" />;
     if (t.includes('pizza')) return <Pizza size={24} className="text-orange-500" />;
     if (t.includes('friet')) return <ChefHat size={24} className="text-amber-500" />;
     if (t.includes('taco')) return <ChefHat size={24} className="text-yellow-600" />;
@@ -865,6 +995,8 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
     if (t.includes('kip')) return <Drumstick size={24} className="text-orange-400" />;
     if (t.includes('croque')) return <Sandwich size={24} className="text-amber-600" />;
     if (t.includes('sushi')) return <Fish size={24} className="text-indigo-400" />;
+    if (t.includes('vis')) return <Fish size={24} className="text-indigo-400" />;
+    if (t.includes('soep')) return <Soup size={24} className="text-rose-500" />;
     return <Utensils size={20} className="text-gray-300" />;
   };
 
