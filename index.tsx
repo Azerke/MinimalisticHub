@@ -588,42 +588,36 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   };
 
   const extractUri = (item: any) => {
-    // The Google Photos Picker API returns baseUrl inside mediaFile object
+    // Robust search for any baseUrl or mediaUri in nested structures
     const uri = item.mediaFile?.baseUrl || 
+           item.preview?.baseUrl ||
            item.mediaFileUri || 
            item.previewUri || 
            item.mediaItem?.mediaFile?.baseUrl ||
+           item.mediaItem?.preview?.baseUrl ||
            item.mediaItem?.mediaFileUri || 
            item.mediaItem?.previewUri || 
            item.baseUrl;
-    
-    if (!uri) {
-      console.error('Could not extract URI from item:', item);
-    }
     
     return uri;
   };
 
   const extractFilename = (item: any) => {
     return item.mediaFile?.filename || 
-           item.filename || 
-           item.mediaItem?.mediaFile?.filename || 
            item.preview?.filename || 
-           "Gekozen foto";
+           item.mediaItem?.mediaFile?.filename || 
+           item.mediaItem?.preview?.filename ||
+           item.filename || 
+           "Foto";
   };
 
   const fetchImageAsBlobUrl = async (uri: string) => {
     if (!accessToken) throw new Error("Geen access token");
     
-    // Google Photos baseUrl supports size/quality parameters
-    // Format: baseUrl=w<width>-h<height> for specific dimensions
-    // Or: baseUrl=s<size> for max dimension, or =d for original
-    // We'll request high quality: original size with =d, or large size like =w3840-h2160
+    // Request original quality from googleusercontent if applicable
     let finalUri = uri;
-    if (uri.includes('googleusercontent.com')) {
-      // Request original quality (full resolution)
+    if (uri.includes('googleusercontent.com') && !uri.includes('=')) {
       finalUri = uri + '=d';
-      // Alternative for large but not original: finalUri = uri + '=w3840-h2160';
     }
     
     const response = await fetch(finalUri, {
@@ -703,7 +697,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
           }
         }, 3000);
       } else {
-        addLog(`Kon pickerUri niet vinden in response: ${JSON.stringify(data)}`, 'error');
+        addLog(`Kon pickerUri niet vinden in response.`, 'error');
       }
     } catch (e: any) {
       addLog(`Picker Session Error: ${e.message}`, 'error');
@@ -719,11 +713,13 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         headers: { Authorization: 'Bearer ' + accessToken }
       });
       const data = await response.json();
-      
       if (data.mediaItems && data.mediaItems.length > 0) {
         addLog(`${data.mediaItems.length} media items gevonden. Downloaden...`, 'info');
+        
+        // Detailed logging of object structure for debugging if needed
+        const first = data.mediaItems[0];
+        console.debug('Raw Media Item:', first);
 
-        // Fetch each image as a blob with auth
         const processedItems = await Promise.all(data.mediaItems.map(async (item: any) => {
           try {
             const uri = extractUri(item);
@@ -749,7 +745,6 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         
         const newPhotos = [...photos, ...finalItems];
         setPhotos(newPhotos);
-        // Persist metadata to localStorage, but strip blobUrl (it's session-local)
         localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos.map(({blobUrl, ...rest}) => rest)));
       } else {
         addLog(`Geen media items gevonden in response of lijst is leeg.`, 'error');
@@ -774,7 +769,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
     if (photos.length === 0) return;
     const interval = setInterval(() => {
       setCurrentIndex(prev => (prev + 1) % photos.length);
-    }, 10000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [photos.length]);
 
@@ -821,7 +816,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
           <div className="h-full flex flex-col items-center justify-center text-center px-10">
             <ShieldAlert size={48} className="text-rose-400 mb-4" />
             <h3 className="text-white text-lg font-black uppercase tracking-widest mb-2">Sessie Verloopen</h3>
-            <p className="text-gray-400 text-xs mb-8">De tijdelijke Google URIs zijn verlopen of ongeldig. Kies opnieuw foto's.</p>
+            <p className="text-gray-400 text-xs mb-8">De tijdelijke Google URIs zijn verlopen. Kies opnieuw foto's.</p>
             <button onClick={createPickerSession} className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">
               Opnieuw Kiezen
             </button>
@@ -837,13 +832,13 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
               >
                 <img 
                   src={photo.blobUrl} 
-                  alt={photo.filename || ""} 
+                  alt={photo.filename || "Foto"} 
                   className="w-full h-full object-cover" 
                   onError={() => {
-                    addLog(`Laadfout voor ${photo.filename}`, 'error');
+                    addLog(`Laadfout voor ${photo.filename || 'item'}`, 'error');
                   }}
                   onLoad={() => {
-                    if (idx === currentIndex) addLog(`Zichtbaar: ${photo.filename}`, 'success');
+                    if (idx === currentIndex) addLog(`Zichtbaar: ${photo.filename || 'item'}`, 'success');
                   }}
                 />
               </div>
@@ -882,7 +877,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
       {showPhotosLog && (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center animate-in fade-in bg-black/90 backdrop-blur-md p-10">
-          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
+          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[90vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
             <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center">
               <div className="flex items-center gap-4 text-blue-400">
                 <ImageIcon size={24} />
@@ -1058,7 +1053,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   }, [selectedWeekType]);
 
   return (
-    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-[90%]'}`}>
+    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-full'}`}>
       <div className="flex justify-between items-center shrink-0 mb-4">
         <div className="flex items-center gap-6">
           <h2 className="text-4xl font-light text-gray-800 tracking-tight">Week Agenda</h2>
@@ -1855,7 +1850,7 @@ const App: React.FC = () => {
           <div className="text-[12px] font-black text-gray-300 uppercase tracking-[0.5em]">HERENTHOUT, BELGIË</div>
         </div>
       </header>
-      <main className="w-full px-[50px] pt-3 pb-10 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
+      <main className="w-full px-[50px] pt-3 pb-4 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
         <section className="xl:col-span-7 h-full">
           {activeMainView === 'agenda' ? ( 
             <Calendar accessToken={accessToken} items={agendaItems} isLoading={agendaLoading} onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} isCollapsed={isAgendaCollapsed} onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} /> 
