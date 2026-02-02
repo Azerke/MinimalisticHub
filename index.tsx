@@ -810,7 +810,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   const allExpired = photos.length > 0 && photos.every(p => p.expired);
 
   return (
-    <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden relative group">
+    <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-[110%] overflow-hidden relative group">
       <div className="absolute inset-0 rounded-[3rem] overflow-hidden">
         {allExpired ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-10">
@@ -877,7 +877,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
       {showPhotosLog && (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center animate-in fade-in bg-black/90 backdrop-blur-md p-10">
-          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[90vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
+          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
             <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center">
               <div className="flex items-center gap-4 text-blue-400">
                 <ImageIcon size={24} />
@@ -1053,7 +1053,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   }, [selectedWeekType]);
 
   return (
-    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-full'}`}>
+    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-[90%]'}`}>
       <div className="flex justify-between items-center shrink-0 mb-4">
         <div className="flex items-center gap-6">
           <h2 className="text-4xl font-light text-gray-800 tracking-tight">Week Agenda</h2>
