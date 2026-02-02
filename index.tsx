@@ -286,8 +286,8 @@ const GeminiAssistantWidget = () => {
 
   return (
     <>
-      <div className={`p-8 rounded-[2.5rem] shadow-sm border transition-all duration-500 overflow-hidden relative h-[600px] flex flex-col ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100'}`}>
-        <div className="flex justify-between items-center mb-6 shrink-0">
+      <div className={`p-8 rounded-[2.5rem] shadow-sm border transition-all duration-500 overflow-hidden relative ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100'}`}>
+        <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-4">
             <button onClick={() => setShowLogs(true)} className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-indigo-400 transition-colors">
               <span className={`w-2 h-2 rounded-full ${(isActive || isStarting) ? 'bg-indigo-500 animate-pulse' : 'bg-gray-300'}`} /> Gemini Hub Live
@@ -300,12 +300,12 @@ const GeminiAssistantWidget = () => {
             {isStarting ? <Loader2 size={20} className="animate-spin" /> : isActive ? <MicOff size={20} /> : <Mic size={20} />}
           </button>
         </div>
-        <div className="flex-1 flex flex-col justify-center space-y-4">
+        <div className="space-y-4">
           {errorMsg ? (
-            <div className="py-2 text-center"><div className="flex flex-col items-center gap-3 text-rose-500 mb-6"><AlertTriangle size={32} /><p className="text-sm font-bold leading-tight max-w-xs">{errorMsg}</p></div>{needsKey && (<button onClick={() => setShowSettings(true)} className="w-full py-4 bg-rose-50 text-rose-600 rounded-2xl text-[11px] font-black uppercase tracking-widest border border-rose-100 hover:bg-rose-100 transition-colors shadow-sm">Instellingen openen</button>)}</div>
+            <div className="py-2"><div className="flex items-center gap-3 text-rose-500 mb-3"><AlertTriangle size={16} /><p className="text-[11px] font-bold leading-tight">{errorMsg}</p></div>{needsKey && (<button onClick={() => setShowSettings(true)} className="w-full py-3 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest border border-rose-100 hover:bg-rose-100 transition-colors shadow-sm">Instellingen openen</button>)}</div>
           ) : isActive ? (
-            <div className="py-4 flex flex-col items-center"><div className="flex items-end gap-2 h-16 mb-8">{[1, 2, 3, 4, 5, 6, 7].map(i => (<div key={i} className={`w-1.5 bg-indigo-400 rounded-full transition-all duration-300 ${isSpeaking ? 'h-full animate-pulse' : 'h-3'}`} style={{animationDelay: `${i * 0.1}s`}} />))}</div><span className="text-sm font-black text-indigo-600 uppercase tracking-[0.3em]">{isSpeaking ? 'Hub spreekt...' : 'Hub luistert...'}</span></div>
-          ) : isStarting ? ( <div className="flex flex-col items-center gap-4"><Loader2 size={40} className="text-indigo-400 animate-spin" /><p className="text-sm font-black text-indigo-400 uppercase tracking-widest animate-pulse">Initialiseren...</p></div> ) : (<div className="text-center space-y-6"><div className="w-20 h-20 bg-gray-50 rounded-[2rem] flex items-center justify-center mx-auto text-gray-300"><Sparkles size={32} /></div><p className="text-sm font-bold text-gray-400 max-w-[200px] mx-auto leading-relaxed">Activeer de assistent voor een live gesprek.</p></div>)}
+            <div className="py-4"><div className="flex items-center gap-2 mb-2"><div className={`flex items-end gap-1 h-6 ${isSpeaking ? 'animate-pulse' : ''}`}>{[1, 2, 3, 4, 5].map(i => (<div key={i} className={`w-1 bg-indigo-400 rounded-full transition-all duration-300 ${isSpeaking ? 'h-full' : 'h-2'}`} style={{animationDelay: `${i * 0.1}s`}} />))}</div><span className="text-xs font-black text-indigo-600 uppercase tracking-widest">{isSpeaking ? 'Hub spreekt...' : 'Hub luistert...'}</span></div></div>
+          ) : isStarting ? ( <p className="text-sm font-medium text-indigo-400 leading-relaxed animate-pulse">Initialiseren...</p> ) : (<p className="text-sm font-medium text-gray-500 leading-relaxed">Activeer de assistent voor een live gesprek.</p>)}
         </div>
       </div>
 
@@ -510,7 +510,7 @@ const WeatherOverlay = ({ onClose, weatherData, loading }: any) => {
         <div className="p-10 flex justify-between items-center bg-white/20 backdrop-blur-xl shrink-0 border-b border-white/40">
           <div className="flex items-center gap-8">
             <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg border border-gray-100">
-              <Cloud size={32} className="text-blue-500" />
+              <Cloud className="w-8 h-8 text-blue-500" />
             </div>
             <div>
               <h3 className="text-4xl font-black text-gray-900 tracking-tight">Weersverwachting</h3>
@@ -588,39 +588,25 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   };
 
   const extractUri = (item: any) => {
-    // Robust search for any baseUrl or mediaUri in nested structures
-    const uri = item.mediaFile?.baseUrl || 
-           item.preview?.baseUrl ||
-           item.mediaFileUri || 
+    // Robust check across known Picker API response structures
+    return item.mediaFileUri || 
            item.previewUri || 
-           item.mediaItem?.mediaFile?.baseUrl ||
-           item.mediaItem?.preview?.baseUrl ||
            item.mediaItem?.mediaFileUri || 
            item.mediaItem?.previewUri || 
            item.baseUrl;
-    
-    return uri;
   };
 
   const extractFilename = (item: any) => {
     return item.mediaFile?.filename || 
            item.preview?.filename || 
            item.mediaItem?.mediaFile?.filename || 
-           item.mediaItem?.preview?.filename ||
            item.filename || 
-           "Foto";
+           "Gekozen foto";
   };
 
   const fetchImageAsBlobUrl = async (uri: string) => {
     if (!accessToken) throw new Error("Geen access token");
-    
-    // Request original quality from googleusercontent if applicable
-    let finalUri = uri;
-    if (uri.includes('googleusercontent.com') && !uri.includes('=')) {
-      finalUri = uri + '=d';
-    }
-    
-    const response = await fetch(finalUri, {
+    const response = await fetch(uri, {
       headers: { Authorization: 'Bearer ' + accessToken }
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -697,7 +683,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
           }
         }, 3000);
       } else {
-        addLog(`Kon pickerUri niet vinden in response.`, 'error');
+        addLog(`Kon pickerUri niet vinden in response: ${JSON.stringify(data)}`, 'error');
       }
     } catch (e: any) {
       addLog(`Picker Session Error: ${e.message}`, 'error');
@@ -716,10 +702,12 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
       if (data.mediaItems && data.mediaItems.length > 0) {
         addLog(`${data.mediaItems.length} media items gevonden. Downloaden...`, 'info');
         
-        // Detailed logging of object structure for debugging if needed
+        // Debug first item structure to find correct properties if still failing
         const first = data.mediaItems[0];
-        console.debug('Raw Media Item:', first);
+        addLog(`Item keys: ${Object.keys(first).join(', ')}`, 'info');
+        if (first.mediaItem) addLog(`Inner mediaItem keys: ${Object.keys(first.mediaItem).join(', ')}`, 'info');
 
+        // Fetch each image as a blob with auth
         const processedItems = await Promise.all(data.mediaItems.map(async (item: any) => {
           try {
             const uri = extractUri(item);
@@ -745,6 +733,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         
         const newPhotos = [...photos, ...finalItems];
         setPhotos(newPhotos);
+        // Persist metadata to localStorage, but strip blobUrl (it's session-local)
         localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos.map(({blobUrl, ...rest}) => rest)));
       } else {
         addLog(`Geen media items gevonden in response of lijst is leeg.`, 'error');
@@ -769,7 +758,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
     if (photos.length === 0) return;
     const interval = setInterval(() => {
       setCurrentIndex(prev => (prev + 1) % photos.length);
-    }, 30000);
+    }, 10000);
     return () => clearInterval(interval);
   }, [photos.length]);
 
@@ -810,13 +799,13 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   const allExpired = photos.length > 0 && photos.every(p => p.expired);
 
   return (
-    <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-[105%] overflow-hidden relative group">
+    <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full overflow-hidden relative group">
       <div className="absolute inset-0 rounded-[3rem] overflow-hidden">
         {allExpired ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-10">
             <ShieldAlert size={48} className="text-rose-400 mb-4" />
-            <h3 className="text-white text-lg font-black uppercase tracking-widest mb-2">Sessie Verloopen</h3>
-            <p className="text-gray-400 text-xs mb-8">De tijdelijke Google URIs zijn verlopen. Kies opnieuw foto's.</p>
+            <h3 className="text-white text-lg font-black uppercase tracking-widest mb-2">Sessie Verlopen</h3>
+            <p className="text-gray-400 text-xs mb-8">De tijdelijke Google URIs zijn verlopen of ongeldig. Kies opnieuw foto's.</p>
             <button onClick={createPickerSession} className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">
               Opnieuw Kiezen
             </button>
@@ -832,13 +821,13 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
               >
                 <img 
                   src={photo.blobUrl} 
-                  alt={photo.filename || "Foto"} 
+                  alt={photo.filename || ""} 
                   className="w-full h-full object-cover" 
                   onError={() => {
-                    addLog(`Laadfout voor ${photo.filename || 'item'}`, 'error');
+                    addLog(`Laadfout voor ${photo.filename}`, 'error');
                   }}
                   onLoad={() => {
-                    if (idx === currentIndex) addLog(`Zichtbaar: ${photo.filename || 'item'}`, 'success');
+                    if (idx === currentIndex) addLog(`Zichtbaar: ${photo.filename}`, 'success');
                   }}
                 />
               </div>
@@ -877,7 +866,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
       {showPhotosLog && (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center animate-in fade-in bg-black/90 backdrop-blur-md p-10">
-          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[90vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
+          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
             <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center">
               <div className="flex items-center gap-4 text-blue-400">
                 <ImageIcon size={24} />
@@ -1053,7 +1042,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
   }, [selectedWeekType]);
 
   return (
-    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-full'}`}>
+    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-[90%]'}`}>
       <div className="flex justify-between items-center shrink-0 mb-4">
         <div className="flex items-center gap-6">
           <h2 className="text-4xl font-light text-gray-800 tracking-tight">Week Agenda</h2>
@@ -1850,7 +1839,7 @@ const App: React.FC = () => {
           <div className="text-[12px] font-black text-gray-300 uppercase tracking-[0.5em]">HERENTHOUT, BELGIË</div>
         </div>
       </header>
-      <main className="w-full px-[50px] pt-3 pb-4 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
+      <main className="w-full px-[50px] pt-3 pb-10 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
         <section className="xl:col-span-7 h-full">
           {activeMainView === 'agenda' ? ( 
             <Calendar accessToken={accessToken} items={agendaItems} isLoading={agendaLoading} onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} isCollapsed={isAgendaCollapsed} onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} /> 
@@ -1870,7 +1859,26 @@ const App: React.FC = () => {
       {showEnergyLogs && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center animate-in fade-in bg-black/80 backdrop-blur-md p-10">
           <div className="bg-[#1a1a1a] w-full max-w-4xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
-            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center"><div className="flex items-center gap-4 text-emerald-400"><Zap size={24} /><h3 className="font-black text-xs uppercase tracking-[0.4em]">Energy System Logs</h3></div><div className="flex items-center gap-4"><button onClick={() => { const text = energyLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"><Copy size={18} /></button><button onClick={() => setEnergyLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all"><Trash2 size={18} /></button><button onClick={() => setShowEnergyLogs(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all"><X size={24} /></button></div></div>
+            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center">
+              <div className="flex items-center gap-4 text-emerald-400">
+                <Zap size={24} />
+                <h3 className="font-black text-xs uppercase tracking-[0.4em]">Energy System Logs</h3>
+              </div>
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => { const text = energyLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} 
+                  className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"
+                >
+                  <Copy size={18} />
+                </button>
+                <button onClick={() => setEnergyLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all">
+                  <Trash2 size={18} />
+                </button>
+                <button onClick={() => setShowEnergyLogs(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
             <div className="p-4 bg-emerald-500/5 border-b border-white/5 flex items-center justify-between px-8">
                <span className="text-[10px] font-bold text-emerald-500/60 uppercase tracking-widest">End-point: {ENERGY_ENDPOINT}</span>
                <a href={ENERGY_ENDPOINT} target="_blank" rel="noreferrer" className="text-[10px] font-black text-emerald-400 uppercase tracking-widest hover:underline flex items-center gap-2">Test URL <ExternalLink size={10} /></a>
