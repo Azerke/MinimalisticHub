@@ -286,7 +286,7 @@ const GeminiAssistantWidget = () => {
 
   return (
     <>
-      <div className={`p-8 rounded-[2.5rem] shadow-sm border transition-all duration-500 overflow-hidden relative h-[600px] flex flex-col ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100'}`}>
+      <div className={`p-8 rounded-[2.5rem] shadow-sm border transition-all duration-500 overflow-hidden relative h-[200px] flex flex-col ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100'}`}>
         <div className="flex justify-between items-center mb-6 shrink-0">
           <div className="flex items-center gap-4">
             <button onClick={() => setShowLogs(true)} className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-indigo-400 transition-colors">
@@ -305,7 +305,7 @@ const GeminiAssistantWidget = () => {
             <div className="py-2 text-center"><div className="flex flex-col items-center gap-3 text-rose-500 mb-6"><AlertTriangle size={32} /><p className="text-sm font-bold leading-tight max-w-xs">{errorMsg}</p></div>{needsKey && (<button onClick={() => setShowSettings(true)} className="w-full py-4 bg-rose-50 text-rose-600 rounded-2xl text-[11px] font-black uppercase tracking-widest border border-rose-100 hover:bg-rose-100 transition-colors shadow-sm">Instellingen openen</button>)}</div>
           ) : isActive ? (
             <div className="py-4 flex flex-col items-center"><div className="flex items-end gap-2 h-16 mb-8">{[1, 2, 3, 4, 5, 6, 7].map(i => (<div key={i} className={`w-1.5 bg-indigo-400 rounded-full transition-all duration-300 ${isSpeaking ? 'h-full animate-pulse' : 'h-3'}`} style={{animationDelay: `${i * 0.1}s`}} />))}</div><span className="text-sm font-black text-indigo-600 uppercase tracking-[0.3em]">{isSpeaking ? 'Hub spreekt...' : 'Hub luistert...'}</span></div>
-          ) : isStarting ? ( <div className="flex flex-col items-center gap-4"><Loader2 size={40} className="text-indigo-400 animate-spin" /><p className="text-sm font-black text-indigo-400 uppercase tracking-widest animate-pulse">Initialiseren...</p></div> ) : (<div className="text-center space-y-6"><div className="w-20 h-20 bg-gray-50 rounded-[2rem] flex items-center justify-center mx-auto text-gray-300"><Sparkles size={32} /></div><p className="text-sm font-bold text-gray-400 max-w-[200px] mx-auto leading-relaxed">Activeer de assistent voor een live gesprek.</p></div>)}
+          ) : isStarting ? ( <div className="flex flex-col items-center gap-4"><Loader2 size={40} className="text-indigo-400 animate-spin" /><p className="text-sm font-black text-indigo-400 uppercase tracking-widest animate-pulse">Initialiseren...</p></div> ) : (<div className="text-center space-y-6"><div className="w-20 h-20 bg-gray-50 rounded-[2rem] flex items-center justify-center mx-auto text-gray-300"><Sparkles size={32} /></div><p className="text-sm font-bold text-gray-400 max-w-[200px] mx-auto leading-relaxed">Activeer de assistent for een live gesprek.</p></div>)}
         </div>
       </div>
 
