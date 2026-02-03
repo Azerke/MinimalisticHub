@@ -14,7 +14,7 @@ import {
   TrendingUp, Activity, History, Save,
   Recycle, Package, FileText, ChevronRight, Wine,
   Pizza, CookingPot, Utensils, Drumstick, Soup, Beef, ChefHat, Sandwich,
-  Fish, Salad, Hamburger
+  Fish, Salad, Hamburger, Download, Upload
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
@@ -22,12 +22,84 @@ import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
 const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
+const SOLAR_FORECAST_ENDPOINT = 'https://100.74.104.126:1881/solardata';
 const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
 
 const WEATHER_CACHE_KEY = 'hub_weather_cache';
 const PHOTOS_CACHE_KEY = 'hub_slideshow_photos';
 const USER_CACHE_KEY = 'hub_user_profile_v3';
+
+// IndexedDB configuration for photo storage
+const DB_NAME = 'HubPhotosDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'photos';
+
+// IndexedDB Helper Functions
+const openPhotosDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    
+    request.onupgradeneeded = (event: any) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        store.createIndex('filename', 'filename', { unique: false });
+      }
+    };
+  });
+};
+
+const savePhotoToIndexedDB = async (photo: any): Promise<void> => {
+  const db = await openPhotosDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.put(photo);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const getAllPhotosFromIndexedDB = async (): Promise<any[]> => {
+  const db = await openPhotosDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.getAll();
+    
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const deletePhotoFromIndexedDB = async (id: string): Promise<void> => {
+  const db = await openPhotosDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.delete(id);
+    
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const clearAllPhotosFromIndexedDB = async (): Promise<void> => {
+  const db = await openPhotosDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.clear();
+    
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
 
 const GOOGLE_COLOR_MAP: Record<string, string> = {
   "1": "#7986cb", "2": "#33b679", "3": "#8e24aa", "4": "#e67c73", "5": "#f6bf26", 
@@ -59,6 +131,17 @@ interface WeatherData {
   daily: { day: string; low: number; high: number; condition: string; icon: 'sun' | 'cloud' | 'rain' | 'storm' | 'snow' | 'drizzle' }[];
 }
 
+interface SolarForecastItem {
+  value: number | string;
+  unit: string;
+  date: string;
+  description: string;
+}
+
+interface SolarDataResponse {
+  solar: Record<string, SolarForecastItem>;
+}
+
 interface EnergyData {
   ev: {
     power: number;
@@ -75,7 +158,7 @@ interface EnergyData {
     dc: number;
     dcTotalDay: number;
     acTotalDay: number;
-    totalDay: number;
+    totalDay: number | string;
   };
   grid: {
     total: number;
@@ -571,21 +654,39 @@ const WeatherOverlay = ({ onClose, weatherData, loading }: any) => {
 };
 
 const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: string | null, onForceLogout: () => void }) => {
-  const [photos, setPhotos] = useState<any[]>(() => {
-    const cached = localStorage.getItem(PHOTOS_CACHE_KEY);
-    return cached ? JSON.parse(cached) : [];
-  });
+  const [photos, setPhotos] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
   const [showPhotosLog, setShowPhotosLog] = useState(false);
   const [photosLogs, setPhotosLogs] = useState<LogEntry[]>([]);
   const hasHydratedRef = useRef(false);
+  const hasLoadedFromDBRef = useRef(false);
 
   const addLog = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
     const timestamp = new Date().toLocaleTimeString('nl-BE', { hour12: false });
     setPhotosLogs(prev => [...prev, { timestamp, msg, type }].slice(-100));
   };
+
+  // Load photos from IndexedDB on mount
+  useEffect(() => {
+    const loadPhotosFromDB = async () => {
+      if (hasLoadedFromDBRef.current) return;
+      hasLoadedFromDBRef.current = true;
+      
+      try {
+        const storedPhotos = await getAllPhotosFromIndexedDB();
+        if (storedPhotos.length > 0) {
+          addLog(`${storedPhotos.length} foto's geladen uit IndexedDB`, 'success');
+          setPhotos(storedPhotos);
+        }
+      } catch (e: any) {
+        addLog(`Fout bij laden uit IndexedDB: ${e.message}`, 'error');
+      }
+    };
+    
+    loadPhotosFromDB();
+  }, []);
 
   const extractUri = (item: any) => {
     // Robust search for any baseUrl or mediaUri in nested structures
@@ -611,7 +712,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
            "Foto";
   };
 
-  const fetchImageAsBlobUrl = async (uri: string) => {
+  const fetchImageAsBlobUrl = async (uri: string): Promise<{ blobUrl: string; blobData: string }> => {
     if (!accessToken) throw new Error("Geen access token");
     
     // Request original quality from googleusercontent if applicable
@@ -626,38 +727,57 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const blob = await response.blob();
     if (blob.size < 100) throw new Error("Onvoldoende data in blob");
-    return URL.createObjectURL(blob);
+    
+    // Convert blob to base64 for IndexedDB storage
+    const blobData = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    
+    const blobUrl = URL.createObjectURL(blob);
+    return { blobUrl, blobData };
   };
 
-  // Hydration effect: Re-fetch blobs for cached items when we have a token
+  // Effect to regenerate blob URLs from stored blob data on mount
   useEffect(() => {
-    const hydrateCachedPhotos = async () => {
-      if (!accessToken || photos.length === 0 || hasHydratedRef.current) return;
+    const regenerateBlobUrls = () => {
+      if (photos.length === 0) return;
       
-      const needsHydration = photos.some(p => !p.blobUrl);
-      if (needsHydration) {
-        hasHydratedRef.current = true;
-        addLog("Bezig met herladen van foto-inhoud uit cache...", 'info');
+      const photosNeedingUrls = photos.filter(p => p.blobData && !p.blobUrl);
+      if (photosNeedingUrls.length > 0) {
+        addLog(`Bezig met regenereren van ${photosNeedingUrls.length} blob URLs...`, 'info');
         
-        const hydrated = await Promise.all(photos.map(async (photo) => {
-          if (photo.blobUrl) return photo;
-          try {
-            const uri = extractUri(photo);
-            if (!uri) throw new Error("Geen bron URI beschikbaar");
-            const blobUrl = await fetchImageAsBlobUrl(uri);
-            return { ...photo, blobUrl, expired: false };
-          } catch (e: any) {
-            addLog(`Fout bij herladen ${photo.filename || 'item'}: ${e.message}`, 'error');
-            return { ...photo, blobUrl: null, expired: true };
+        const updatedPhotos = photos.map(photo => {
+          if (photo.blobData && !photo.blobUrl) {
+            // Convert base64 back to blob URL
+            const blob = dataURLToBlob(photo.blobData);
+            const blobUrl = URL.createObjectURL(blob);
+            return { ...photo, blobUrl };
           }
-        }));
+          return photo;
+        });
         
-        setPhotos(hydrated);
+        setPhotos(updatedPhotos);
+        addLog(`Blob URLs geregenereerd`, 'success');
       }
     };
 
-    hydrateCachedPhotos();
-  }, [accessToken, photos.length]);
+    regenerateBlobUrls();
+  }, [photos.length]);
+
+  const dataURLToBlob = (dataURL: string): Blob => {
+    const arr = dataURL.split(',');
+    const mime = arr[0].match(/:(.*?);/)![1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  };
 
   const createPickerSession = async () => {
     if (!accessToken) return;
@@ -715,10 +835,6 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
       const data = await response.json();
       if (data.mediaItems && data.mediaItems.length > 0) {
         addLog(`${data.mediaItems.length} media items gevonden. Downloaden...`, 'info');
-        
-        // Detailed logging of object structure for debugging if needed
-        const first = data.mediaItems[0];
-        console.debug('Raw Media Item:', first);
 
         const processedItems = await Promise.all(data.mediaItems.map(async (item: any) => {
           try {
@@ -726,14 +842,19 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
             if (!uri) throw new Error("Item heeft geen media URI");
             
             const filename = extractFilename(item);
-            const blobUrl = await fetchImageAsBlobUrl(uri);
+            const { blobUrl, blobData } = await fetchImageAsBlobUrl(uri);
             
-            return { 
+            const photoItem = { 
               ...item, 
               filename,
-              blobUrl, 
-              expired: false 
+              blobUrl,
+              blobData // Store base64 data for persistence
             };
+            
+            // Save to IndexedDB
+            await savePhotoToIndexedDB(photoItem);
+            
+            return photoItem;
           } catch (e: any) {
             addLog(`Download fout: ${e.message}`, 'error');
             return null;
@@ -741,11 +862,10 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         }));
 
         const finalItems = processedItems.filter(item => item !== null);
-        addLog(`${finalItems.length} media items succesvol verwerkt.`, 'success');
+        addLog(`${finalItems.length} foto's opgeslagen in IndexedDB`, 'success');
         
         const newPhotos = [...photos, ...finalItems];
         setPhotos(newPhotos);
-        localStorage.setItem(PHOTOS_CACHE_KEY, JSON.stringify(newPhotos.map(({blobUrl, ...rest}) => rest)));
       } else {
         addLog(`Geen media items gevonden in response of lijst is leeg.`, 'error');
       }
@@ -754,15 +874,102 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
     }
   };
 
-  const clearSlideshow = () => {
-    addLog("Slideshow gewist.", 'info');
+  const clearSlideshow = async () => {
+    addLog("Slideshow wissen...", 'info');
     photos.forEach(photo => {
       if (photo.blobUrl) URL.revokeObjectURL(photo.blobUrl);
     });
     setPhotos([]);
-    localStorage.removeItem(PHOTOS_CACHE_KEY);
     setCurrentIndex(0);
-    hasHydratedRef.current = false;
+    
+    try {
+      await clearAllPhotosFromIndexedDB();
+      addLog("Slideshow gewist uit IndexedDB", 'success');
+    } catch (e: any) {
+      addLog(`Fout bij wissen: ${e.message}`, 'error');
+    }
+  };
+
+  const downloadBackup = async () => {
+    try {
+      addLog("Backup maken...", 'info');
+      const photosToBackup = await getAllPhotosFromIndexedDB();
+      
+      if (photosToBackup.length === 0) {
+        addLog("Geen foto's om te backuppen", 'error');
+        return;
+      }
+
+      const backup = {
+        version: 1,
+        timestamp: new Date().toISOString(),
+        photos: photosToBackup
+      };
+
+      const json = JSON.stringify(backup);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `slideshow-backup-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      addLog(`Backup van ${photosToBackup.length} foto's gedownload`, 'success');
+    } catch (e: any) {
+      addLog(`Backup fout: ${e.message}`, 'error');
+    }
+  };
+
+  const restoreBackup = async (file: File) => {
+    try {
+      addLog("Backup herstellen...", 'info');
+      
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      
+      if (!backup.photos || !Array.isArray(backup.photos)) {
+        throw new Error("Ongeldig backup formaat");
+      }
+
+      // Clear existing photos
+      await clearAllPhotosFromIndexedDB();
+      photos.forEach(photo => {
+        if (photo.blobUrl) URL.revokeObjectURL(photo.blobUrl);
+      });
+
+      // Save all photos to IndexedDB
+      for (const photo of backup.photos) {
+        await savePhotoToIndexedDB(photo);
+      }
+
+      // Convert blobData to blobUrls
+      const restoredPhotos = backup.photos.map((photo: any) => {
+        if (photo.blobData) {
+          const blob = dataURLToBlob(photo.blobData);
+          const blobUrl = URL.createObjectURL(blob);
+          return { ...photo, blobUrl };
+        }
+        return photo;
+      });
+
+      setPhotos(restoredPhotos);
+      setCurrentIndex(0);
+      
+      addLog(`${backup.photos.length} foto's hersteld uit backup`, 'success');
+    } catch (e: any) {
+      addLog(`Restore fout: ${e.message}`, 'error');
+    }
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      restoreBackup(file);
+    }
   };
 
   useEffect(() => {
@@ -800,29 +1007,23 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         <ImageIcon size={32} className="text-gray-300" />
       </div>
       <h3 className="text-lg font-black text-gray-800 uppercase tracking-tight mb-2">Slideshow Leeg</h3>
-      <p className="text-sm text-gray-400 mb-10 max-w-xs">Gebruik de Google Photos Picker om foto's te kiezen.</p>
-      <button onClick={createPickerSession} className="px-12 py-6 bg-indigo-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-[0.2em] shadow-2xl hover:bg-indigo-700 transition-all active:scale-95 flex items-center gap-3">
-        <Plus size={20} /> Foto's Kiezen
-      </button>
+      <p className="text-sm text-gray-400 mb-10 max-w-xs">Gebruik de Google Photos Picker om foto's te kiezen of herstel een backup.</p>
+      <div className="flex flex-col gap-4">
+        <button onClick={createPickerSession} className="px-12 py-6 bg-indigo-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-[0.2em] shadow-2xl hover:bg-indigo-700 transition-all active:scale-95 flex items-center justify-center gap-3">
+          <Plus size={20} /> Foto's Kiezen
+        </button>
+        <label className="px-12 py-6 bg-gray-100 text-gray-700 rounded-[2rem] text-[13px] font-black uppercase tracking-[0.2em] hover:bg-gray-200 transition-all active:scale-95 flex items-center justify-center gap-3 cursor-pointer">
+          <Upload size={20} /> Backup Herstellen
+          <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+        </label>
+      </div>
     </div>
   );
 
-  const allExpired = photos.length > 0 && photos.every(p => p.expired);
-
   return (
-    <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-[100%] overflow-hidden relative group">
+    <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full max-h-[1200px] overflow-hidden relative group">
       <div className="absolute inset-0 rounded-[3rem] overflow-hidden">
-        {allExpired ? (
-          <div className="h-full flex flex-col items-center justify-center text-center px-10">
-            <ShieldAlert size={48} className="text-rose-400 mb-4" />
-            <h3 className="text-white text-lg font-black uppercase tracking-widest mb-2">Sessie Verloopen</h3>
-            <p className="text-gray-400 text-xs mb-8">De tijdelijke Google URIs zijn verlopen. Kies opnieuw foto's.</p>
-            <button onClick={createPickerSession} className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">
-              Opnieuw Kiezen
-            </button>
-          </div>
-        ) : (
-          photos.map((photo, idx) => {
+        {photos.map((photo, idx) => {
             if (!photo.blobUrl) return null;
             
             return (
@@ -843,8 +1044,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
                 />
               </div>
             );
-          })
-        )}
+          })}
       </div>
       
       {/* Overlay controls and metadata */}
@@ -854,6 +1054,13 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
         <button onClick={createPickerSession} className="h-14 px-6 bg-white/20 backdrop-blur-md rounded-2xl flex items-center gap-3 text-white hover:bg-white/40 transition-colors">
           <Plus size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Toevoegen</span>
         </button>
+        <button onClick={downloadBackup} title="Backup downloaden" className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-emerald-400 hover:bg-white/40 transition-colors">
+          <Download size={18} />
+        </button>
+        <label title="Backup herstellen" className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-blue-400 hover:bg-white/40 transition-colors cursor-pointer">
+          <Upload size={18} />
+          <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+        </label>
         <button onClick={clearSlideshow} title="Slideshow wissen" className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-rose-400 hover:bg-white/40 transition-colors">
           <Trash2 size={18} />
         </button>
@@ -867,8 +1074,8 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
           onClick={() => setShowPhotosLog(true)}
           className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 hover:opacity-100 transition-opacity text-left cursor-help flex items-center gap-2"
         >
-          <span className={`w-1.5 h-1.5 rounded-full ${allExpired ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-          Slideshow • {photos.length} Foto's {allExpired && "(Verlopen)"}
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          Slideshow • {photos.length} Foto's
         </button>
         <span className="text-xs font-bold truncate max-w-sm pointer-events-none">
           {photos[currentIndex]?.filename || "Laden..."}
@@ -913,7 +1120,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
   );
 };
 
-const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onToggleCollapse }: { accessToken: string | null; items: AgendaItem[]; isLoading: boolean; onRefresh: () => void; isCollapsed: boolean; onToggleCollapse: () => void; }) => {
+const Calendar = ({ accessToken, items, isLoading, solarData, onRefresh, isCollapsed, onToggleCollapse }: { accessToken: string | null; items: AgendaItem[]; isLoading: boolean; solarData: SolarDataResponse | null; onRefresh: () => void; isCollapsed: boolean; onToggleCollapse: () => void; }) => {
   const [selectedTimezone, setSelectedTimezone] = useState<string>('Europe/Brussels');
   const [showWeekPicker, setShowWeekPicker] = useState(false);
   const [selectedWeekType, setSelectedWeekType] = useState<'rolling' | Date>('rolling');
@@ -935,7 +1142,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
       const sun = new Date(mon);
       sun.setDate(sun.getDate() + 6);
       
-      const label = `${mon.getDate().toString().padStart(2, '0')}/${(mon.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getMonth() + 1).toString().padStart(2, '0')}`;
+      const label = `${mon.getDate().toString().padStart(2, '0')}/${(mon.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getDate() + 1).toString().padStart(2, '0')}`;
       options.push({ type: mon, label });
     }
     return options;
@@ -968,6 +1175,13 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
       const endDayStr = new Date(item.end.getTime() - 1).toLocaleDateString('en-CA', { timeZone: selectedTimezone });
       return dayStr >= startDayStr && dayStr <= endDayStr;
     });
+  };
+
+  const getSolarForecastForDay = (date: Date) => {
+    if (!solarData?.solar) return null;
+    const dStr = date.getDate().toString().padStart(2, '0') + '/' + (date.getMonth() + 1).toString().padStart(2, '0') + '/' + date.getFullYear();
+    // Search for a forecast entry with this date
+    return Object.values(solarData.solar).find(item => item.date === dStr && item.description.includes('estimated'));
   };
 
   const toggleTimezone = () => {
@@ -1049,7 +1263,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
     if (selectedWeekType === 'rolling') return 'Komende 7 dagen';
     const sun = new Date(selectedWeekType);
     sun.setDate(sun.getDate() + 6);
-    return `${selectedWeekType.getDate().toString().padStart(2, '0')}/${(selectedWeekType.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getMonth() + 1).toString().padStart(2, '0')}`;
+    return `${selectedWeekType.getDate().toString().padStart(2, '0')}/${(selectedWeekType.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getDate() + 1).toString().padStart(2, '0')}`;
   }, [selectedWeekType]);
 
   return (
@@ -1136,6 +1350,7 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                 const wasteEvents = dayEvents.filter(e => isWaste(e.title));
                 const foodEvents = dayEvents.filter(e => isFood(e.title));
                 const regularEvents = dayEvents.filter(e => !isWaste(e.title) && !isFood(e.title));
+                const solarForecast = getSolarForecastForDay(date);
                 const today = new Date().toDateString() === date.toDateString(); 
                 const dateKey = date.toISOString().split('T')[0];
 
@@ -1240,6 +1455,19 @@ const Calendar = ({ accessToken, items, isLoading, onRefresh, isCollapsed, onTog
                           </div>
                         )}
                       </div>
+                      
+                      {/* Solar Yield Bottom Display */}
+                      {solarForecast && (
+                        <div className="mt-3 pt-3 border-t border-amber-200/40 flex items-center justify-between animate-in fade-in">
+                          <div className="flex items-center gap-2">
+                             <Sun size={14} className="text-amber-500 fill-amber-50" />
+                             <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest"></span>
+                          </div>
+                          <span className="text-sm font-black text-amber-700 tabular-nums">
+                            {solarForecast.value} <span className="text-[10px] opacity-60">kWh</span>
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div> 
                 ); 
@@ -1596,7 +1824,15 @@ const EnergyWidget = ({ data, error, onTitleClick, onWidgetClick, apiUrl }: { da
               <span className="text-2xl font-black text-gray-900 tabular-nums">{data ? data.battery.soc + '%' : '--%'}</span>
             </div>
           </div>
-          <div />
+
+          <div className="flex flex-col gap-2 items-center text-center">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Zon Opbrengst</span>
+            <div className="flex items-center justify-center gap-2">
+              <span className="text-2xl font-black tabular-nums text-gray-900">{data ? data.solar.totalDay : '--'}</span>
+              <span className="text-[10px] font-bold text-gray-300">kWh</span>
+            </div>
+          </div>
+
           <div className="flex flex-col gap-2 text-right items-end">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Zon Forecast</span>
             <div className="flex items-center justify-end gap-2">
@@ -1624,6 +1860,7 @@ const App: React.FC = () => {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [isEnergyOpen, setIsEnergyOpen] = useState(false);
   const [energyData, setEnergyData] = useState<EnergyData | null>(null);
+  const [solarForecastData, setSolarForecastData] = useState<SolarDataResponse | null>(null);
   const [energyError, setEnergyError] = useState<string | null>(null);
   const [energyLogs, setEnergyLogs] = useState<LogEntry[]>([]);
   const [showEnergyLogs, setShowEnergyLogs] = useState(false);
@@ -1783,51 +2020,63 @@ const App: React.FC = () => {
   const startEnergySync = () => { 
     return setInterval(async () => { 
       try { 
-        const resp = await fetch(ENERGY_ENDPOINT); 
-        if (!resp.ok) throw new Error(`Status: ${resp.status}`);
-        const raw = await resp.json(); 
+        // Concurrent fetches for performance
+        const [energyResp, solarForecastResp] = await Promise.all([
+          fetch(ENERGY_ENDPOINT),
+          fetch(SOLAR_FORECAST_ENDPOINT)
+        ]);
+
+        if (!energyResp.ok) throw new Error(`Energy Status: ${energyResp.status}`);
+        const energyRaw = await energyResp.json(); 
+        
         setEnergyData({ 
           ev: {
-            power: raw.ev.current_power.value,
-            chargedToday: raw.ev.charged_today.value,
-            chargedMonth: raw.ev.charged_month.value,
-            totalCounter: raw.ev.total_counter.value,
-            startDay: raw.ev.start_day.value,
-            startMonth: raw.ev.start_month.value,
-            status: raw.ev.status.value
+            power: energyRaw.ev.current_power.value,
+            chargedToday: energyRaw.ev.charged_today.value,
+            chargedMonth: energyRaw.ev.charged_month.value,
+            totalCounter: energyRaw.ev.total_counter.value,
+            startDay: energyRaw.ev.start_day.value,
+            startMonth: energyRaw.ev.start_month.value,
+            status: energyRaw.ev.status.value
           },
           solar: {
-            total: raw.solar.total_power.value,
-            ac: raw.solar.ac_pv_power.value,
-            dc: raw.solar.dc_pv_power.value,
-            dcTotalDay: raw.solar.dc_pv_total.value,
-            acTotalDay: raw.solar.ac_pv_totalday.value,
-            totalDay: raw.solar.total_powerday.value
+            total: energyRaw.solar.total_power.value,
+            ac: energyRaw.solar.ac_pv_power.value,
+            dc: energyRaw.solar.dc_pv_power.value,
+            dcTotalDay: energyRaw.solar.dc_pv_total.value,
+            acTotalDay: energyRaw.solar.ac_pv_totalday.value,
+            totalDay: energyRaw.solar.total_powerday.value
           },
           grid: {
-            total: raw.grid.total_power.value,
-            setpoint: raw.grid.setpoint.value,
-            acPower: raw.grid.ac_power.value,
-            dcPower: raw.grid.dc_power.value
+            total: energyRaw.grid.total_power.value,
+            setpoint: energyRaw.grid.setpoint.value,
+            acPower: energyRaw.grid.ac_power.value,
+            dcPower: energyRaw.grid.dc_power.value
           },
           battery: {
-            soc: raw.battery.soc.value,
-            status: raw.battery.status.value,
-            power: raw.battery.power.value
+            soc: energyRaw.battery.soc.value,
+            status: energyRaw.battery.status.value,
+            power: energyRaw.battery.power.value
           },
           forecast: {
-            prediction: parseFloat(raw.forecast.prediction.value),
-            summary: raw.forecast.summary.value
+            prediction: parseFloat(energyRaw.forecast.prediction.value),
+            summary: energyRaw.forecast.summary.value
           },
           meta: {
-            timestamp: raw.meta.timestamp,
-            system: raw.meta.system
+            timestamp: energyRaw.meta.timestamp,
+            system: energyRaw.meta.system
           }
         }); 
+
+        if (solarForecastResp.ok) {
+          const solarRaw = await solarForecastResp.json();
+          setSolarForecastData(solarRaw);
+        }
+
         setEnergyError(null); 
-        addEnergyLog("Data succesvol opgehaald van " + ENERGY_ENDPOINT, "success");
+        addEnergyLog("Data succesvol opgehaald", "success");
       } catch (e: any) { 
-        setEnergyError("Geen verbinding"); 
+        setEnergyError("Verbindingsfout"); 
         addEnergyLog("Fetch fout: " + e.message, "error");
       } 
     }, 2000); 
@@ -1835,25 +2084,47 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen w-full bg-[#fcfcfc] flex flex-col animate-in fade-in">
-      <header className="w-full px-[50px] pt-16 pb-4 flex flex-col md:flex-row md:items-end justify-between shrink-0">
-        <div className="flex flex-col md:flex-row items-center md:items-baseline gap-16 text-left">
-          <div className="flex flex-col"><div className="text-[7rem] sm:text-[9rem] font-black tracking-tighter text-gray-900 leading-[0.8] tabular-nums">{currentDate.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}</div><div className="flex items-center gap-6 mt-6 px-2"><CalendarIcon className="w-6 h-6 text-gray-200" /><p className="text-gray-400 text-sm uppercase tracking-[0.5em] font-black">{currentDate.toLocaleDateString('nl-BE', { weekday: 'long', month: 'long', day: 'numeric' })}</p></div></div>
-          <h1 className="text-5xl sm:text-7xl font-extralight tracking-tighter text-gray-300 leading-none">{currentDate.getHours() < 12 ? 'Goedemorgen' : currentDate.getHours() < 18 ? 'Goedemiddag' : 'Goedenavond'}</h1>
+      <header className="w-full px-[50px] pt-6 pb-2 flex flex-col md:flex-row md:items-center justify-between shrink-0 relative">
+        {/* Left Section: Greeting + Date */}
+        <div className="flex flex-col gap-1.5 z-10 md:w-1/3">
+          <h1 className="text-4xl sm:text-6xl font-extralight tracking-tighter text-gray-300 leading-none">
+            {currentDate.getHours() < 12 ? 'Goedemorgen' : currentDate.getHours() < 18 ? 'Goedemiddag' : 'Goedenavond'}
+          </h1>
+          <div className="flex items-center gap-4 px-1">
+            <CalendarIcon className="w-5 h-5 text-gray-200" />
+            <p className="text-gray-400 text-xs uppercase tracking-[0.4em] font-black">
+              {currentDate.toLocaleDateString('nl-BE', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </p>
+          </div>
         </div>
-        <div className="mt-10 md:mt-0 flex flex-col items-end gap-10">
-          <div className="flex items-center gap-10">
+
+        {/* Center Section: Clock */}
+        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 text-[7rem] sm:text-[9rem] font-black tracking-tighter text-gray-900 leading-none tabular-nums py-4 md:py-0">
+          {currentDate.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}
+        </div>
+
+        {/* Right Section: Actions */}
+        <div className="md:w-1/3 flex items-center justify-end gap-10 z-10">
+          <div className="flex items-center gap-8">
             {accessToken && ( <button onClick={() => setActiveMainView(activeMainView === 'agenda' ? 'photos' : 'agenda')} className={'w-16 h-16 border rounded-[2rem] shadow-xl flex items-center justify-center transition-all ' + (activeMainView === 'photos' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white border-gray-100 text-gray-400 hover:text-gray-900')}>{activeMainView === 'agenda' ? <ImageIcon size={24} /> : <CalendarIcon size={24} />}</button> )}
             <button onClick={toggleFullScreen} className="w-16 h-16 bg-white border border-gray-100 rounded-[2rem] shadow-xl flex items-center justify-center text-gray-400 hover:text-gray-900">{isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}</button>
             {!accessToken ? (<button onClick={() => handleLogin()} disabled={isSyncing} className="px-12 py-6 bg-gray-900 text-white rounded-[2.5rem] text-[13px] font-black uppercase tracking-widest shadow-2xl">Google Sync</button>) : ( <div className="flex items-center gap-8 bg-white p-4 pr-10 rounded-[2.5rem] border border-gray-100 shadow-xl cursor-pointer" onClick={handleLogout}><div className="w-16 h-16 bg-gray-100 rounded-3xl overflow-hidden border border-gray-50"><img src={user?.picture} alt="" className="w-full h-full object-cover" /></div><div className="text-right"><div className="text-[13px] font-black text-gray-900 uppercase tracking-widest">{user?.name}</div><div className="text-[10px] text-green-500 font-bold flex items-center justify-end gap-2 mt-1"><CheckCircle2 size={12}/> ONLINE</div></div></div> )}
             <WeatherWidget data={weatherData} onClick={() => fetchWeatherForecast(true)} isRefreshing={weatherLoading} />
           </div>
-          <div className="text-[12px] font-black text-gray-300 uppercase tracking-[0.5em]">HERENTHOUT, BELGIË</div>
         </div>
       </header>
       <main className="w-full px-[50px] pt-3 pb-4 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
         <section className="xl:col-span-7 h-full">
           {activeMainView === 'agenda' ? ( 
-            <Calendar accessToken={accessToken} items={agendaItems} isLoading={agendaLoading} onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} isCollapsed={isAgendaCollapsed} onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} /> 
+            <Calendar 
+              accessToken={accessToken} 
+              items={agendaItems} 
+              isLoading={agendaLoading} 
+              solarData={solarForecastData}
+              onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} 
+              isCollapsed={isAgendaCollapsed} 
+              onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} 
+            /> 
           ) : ( 
             <GooglePhotosWidget accessToken={accessToken} onForceLogout={handleLogout} /> 
           )}
