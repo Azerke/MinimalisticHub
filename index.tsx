@@ -1836,7 +1836,8 @@ const EnergyWidget = ({ data, error, onTitleClick, onWidgetClick, apiUrl }: { da
           <div className="flex flex-col gap-2 text-right items-end">
             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Zon Forecast</span>
             <div className="flex items-center justify-end gap-2">
-              <span className={'text-2xl font-black tabular-nums text-gray-900'}>{data ? Math.round(data.forecast.prediction) + ' kWh' : '--'}</span>
+              <span className={'text-2xl font-black tabular-nums text-gray-900'}>{data ? data.forecast.prediction.toFixed(2)  : '--'}</span>
+              <span className="text-[10px] font-bold text-gray-300">kWh</span>
             </div>
           </div>
         </div>
