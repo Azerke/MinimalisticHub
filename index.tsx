@@ -17,12 +17,14 @@ import {
   Fish, Salad, Hamburger, Download, Upload
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
+import { SpotifyWidget } from './SpotifyWidget';
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
 const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
 const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
 const SOLAR_FORECAST_ENDPOINT = 'https://100.74.104.126:1881/solardata';
+const NODERED_BASE_URL = 'https://100.74.104.126:1881';
 const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
 
@@ -122,7 +124,9 @@ interface AgendaItem {
   isAllDay: boolean; 
   htmlLink: string;
   allDayStartStr?: string; 
-  allDayEndStr?: string;   
+  allDayEndStr?: string;
+  textColor?: string; 
+  description?: string;
 }
 
 interface WeatherData {
@@ -179,11 +183,6 @@ interface EnergyData {
     timestamp: string;
     system: string;
   };
-}
-
-interface SpotifyConfig {
-  username: string;
-  password_b64: string;
 }
 
 interface LogEntry {
@@ -426,7 +425,7 @@ const GeminiAssistantWidget = () => {
                 <li className="flex gap-4 items-start">
                   <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
                   <p className="text-xs text-gray-600 font-medium leading-normal">
-                    Gebruik een sleutel uit een project binnen je <strong>betaalde organisatie</strong>. Gratis keys werken niet voor Live Voice.
+                    Gebruik een sleutel uit een project binnen je <strong>betaalde organisatie</strong>. Gratis keys werken niet for Live Voice.
                   </p>
                 </li>
               </ul>
@@ -828,7 +827,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
   const fetchSessionItems = async (sessionId: string) => {
     try {
-      addLog(`Media items ophalen voor sessie: ${sessionId}`, 'info');
+      addLog(`Media items ophalen for sessie: ${sessionId}`, 'info');
       const response = await fetch(`https://photospicker.googleapis.com/v1/mediaItems?sessionId=${sessionId}`, {
         headers: { Authorization: 'Bearer ' + accessToken }
       });
@@ -1397,7 +1396,10 @@ const Calendar = ({ accessToken, items, isLoading, solarData, onRefresh, isColla
                                 {item.end.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                               </span>
                             )}
-                            <span className="text-[30px] font-bold leading-tight line-clamp-3 pl-1 pr-1">
+                            <span 
+                              className="text-[30px] font-bold leading-tight line-clamp-3 pl-1 pr-1"
+                              style={item.textColor ? { color: item.textColor } : {}}
+                            >
                               {item.title}
                             </span>
                           </div>
@@ -1496,244 +1498,6 @@ const Calendar = ({ accessToken, items, isLoading, solarData, onRefresh, isColla
   );
 };
 
-const SpotifyWidget = ({ config, accessToken, onRefreshConfig }: { config: SpotifyConfig | null; accessToken: string | null; onRefreshConfig: () => void }) => {
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [editUsername, setEditUsername] = useState(config?.username || "");
-  const [editPasswordB64, setEditPasswordB64] = useState(config?.password_b64 || "");
-
-  useEffect(() => {
-    if (config) {
-      setEditUsername(config.username);
-      setEditPasswordB64(config.password_b64);
-    }
-  }, [config]);
-
-  const handleSaveConfig = async () => {
-    if (!accessToken) return;
-    setIsSaving(true);
-    try {
-      const searchResp = await fetch("https://www.googleapis.com/drive/v3/files?q=name='WalboFamiilyConfig.txt' and trashed=false", {
-        headers: { Authorization: 'Bearer ' + accessToken }
-      });
-      if (!searchResp.ok) throw new Error(`Search failed: ${searchResp.statusText}`);
-      
-      const searchData = await searchResp.json();
-      let fileId = null;
-      let existingContent: any = { connections: { spotify: { username: "", password_b64: "" } } };
-
-      if (searchData.files && searchData.files.length > 0) {
-        fileId = searchData.files[0].id;
-        const fileResp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-          headers: { Authorization: 'Bearer ' + accessToken }
-        });
-        
-        if (fileResp.ok) {
-           const text = await fileResp.text();
-           try {
-             existingContent = text ? JSON.parse(text) : { connections: { spotify: { username: "", password_b64: "" } } };
-           } catch (e) {
-             existingContent = { connections: { spotify: { username: "", password_b64: "" } } };
-           }
-        }
-      }
-
-      const currentConnections = existingContent?.connections || {};
-      const newContent = {
-        ...existingContent,
-        connections: {
-          ...currentConnections,
-          spotify: {
-            username: editUsername,
-            password_b64: editPasswordB64
-          }
-        }
-      };
-
-      const bodyContent = JSON.stringify(newContent, null, 2);
-
-      if (fileId) {
-        const updateResp = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-          method: 'PATCH',
-          headers: { 
-            'Authorization': 'Bearer ' + accessToken,
-            'Content-Type': 'text/plain'
-          },
-          body: bodyContent
-        });
-        if (!updateResp.ok) throw new Error(`Update failed: ${updateResp.statusText}`);
-      } else {
-        const metadata = {
-          name: 'WalboFamiilyConfig.txt',
-          mimeType: 'text/plain'
-        };
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', new Blob([bodyContent], { type: 'text/plain' }));
-
-        const createResp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + accessToken },
-          body: form
-        });
-        if (!createResp.ok) throw new Error(`Create failed: ${createResp.statusText}`);
-      }
-
-      alert("Spotify configuratie succesvol opgeslagen op Google Drive!");
-      setShowSettings(false);
-      onRefreshConfig();
-    } catch (e: any) {
-      alert(`Fout bij opslaan van configuratie: ${e.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-  
-  const WidgetContent = () => (
-    <div className="flex-1 flex flex-col items-center justify-center space-y-6">
-      <div className="relative group">
-         <div className="w-40 h-40 bg-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl transition-transform group-hover:scale-105 duration-500">
-           <img src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?q=80&w=400&auto=format&fit=crop" alt="Album Art" className="w-full h-full object-cover" />
-         </div>
-         <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-white shadow-lg">
-           <Volume2 size={16} />
-         </div>
-      </div>
-
-      <div className="text-center w-full px-4">
-        <h4 className="text-xl font-black text-gray-800 tracking-tight truncate">Mockingbird</h4>
-        <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">Eminem</p>
-      </div>
-
-      <div className="w-full space-y-3 px-4">
-        <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
-          <div className="h-full bg-emerald-400 w-2/3 rounded-full" />
-        </div>
-        <div className="flex justify-between text-[10px] font-black text-gray-300 tabular-nums">
-          <span>2:34</span>
-          <span>4:11</span>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-10 text-gray-400">
-        <button className="hover:text-emerald-500 transition-colors"><SkipBack size={24} fill="currentColor" /></button>
-        <button onClick={() => setIsPlaying(!isPlaying)} className="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black transition-all active:scale-90 shadow-xl">
-          {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
-        </button>
-        <button className="hover:text-emerald-500 transition-colors"><SkipForward size={24} fill="currentColor" /></button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="p-8 bg-white rounded-[2.5rem] shadow-sm border border-gray-100 flex-1 flex flex-col transition-all hover:border-emerald-200 relative">
-      <div className="flex justify-between items-center mb-6">
-        <span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2">
-          <Music size={10} className="text-emerald-500" /> Spotify
-        </span>
-        <div className="flex items-center gap-4">
-           {config && (
-             <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{config.username}</span>
-             </div>
-           )}
-           <button onClick={() => setShowSettings(true)} className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-400 rounded-xl hover:text-emerald-500 transition-colors">
-              <Settings size={14} />
-            </button>
-        </div>
-      </div>
-
-      {!config ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-          <div className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center mb-6">
-            <Music className="text-emerald-400" />
-          </div>
-          <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 leading-relaxed">Configuratie ontbreekt of is onvolledig</p>
-          <button onClick={() => setShowSettings(true)} className="px-8 py-3 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 active:scale-95 transition-all">
-            Instellen
-          </button>
-        </div>
-      ) : (
-        <WidgetContent />
-      )}
-
-      {showSettings && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center animate-in fade-in duration-300 bg-white/95 backdrop-blur-3xl p-10">
-          <div className="bg-white w-full max-w-2xl p-16 rounded-[4rem] shadow-2xl border border-gray-100 flex flex-col">
-            <div className="flex justify-between items-center w-full mb-10">
-              <div className="flex items-center gap-6">
-                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-[1.5rem] flex items-center justify-center">
-                  <Music size={28} />
-                </div>
-                <h3 className="text-2xl font-black text-gray-900 uppercase tracking-widest">Spotify Beheer</h3>
-              </div>
-              <button onClick={() => setShowSettings(false)} className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-colors">
-                <X size={24} />
-              </button>
-            </div>
-
-            <p className="text-sm text-gray-500 leading-relaxed mb-10">
-              Deze configuratie wordt gesynchroniseerd via het bestand <strong>WalboFamiilyConfig.txt</strong> op je Google Drive.
-            </p>
-
-            <div className="space-y-8 mb-12">
-              <div className="space-y-3">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Spotify Gebruikersnaam</label>
-                <input 
-                  type="text" 
-                  value={editUsername}
-                  onChange={(e) => setEditUsername(e.target.value)}
-                  placeholder="Bijv. jandevries"
-                  className="w-full px-8 py-5 bg-gray-50 border border-gray-100 rounded-[1.5rem] text-sm font-bold focus:outline-none focus:border-emerald-400 transition-colors"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4">Password (Base64)</label>
-                <div className="relative">
-                  <input 
-                    type="password" 
-                    value={editPasswordB64}
-                    onChange={(e) => setEditPasswordB64(e.target.value)}
-                    placeholder="Base64 encoded string"
-                    className="w-full px-8 py-5 bg-gray-50 border border-gray-100 rounded-[1.5rem] text-sm font-bold focus:outline-none focus:border-emerald-400 transition-colors"
-                  />
-                  <div className="absolute right-6 top-1/2 -translate-y-1/2 text-emerald-500">
-                    <Key size={18} />
-                  </div>
-                </div>
-                <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest ml-4 mt-2">Let op: Gebruik een base64 encoded wachtwoord voor veiligheid.</p>
-              </div>
-            </div>
-
-            <div className="w-full p-8 bg-emerald-50 rounded-[2rem] border border-emerald-100 mb-12">
-              <h4 className="text-[10px] font-black text-emerald-700 uppercase tracking-[0.2em] mb-4 flex items-center gap-2"><Info size={12} /> Instructies</h4>
-              <p className="text-[11px] text-emerald-600 font-medium leading-relaxed">
-                De Hub leest je Spotify gegevens uit de 'connections' sectie van het config bestand. 
-                Zorg ervoor dat je ingelogd bent met Google om deze wijzigingen direct naar Drive te schrijven.
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <button 
-                onClick={handleSaveConfig} 
-                disabled={isSaving || !accessToken}
-                className={`w-full py-8 rounded-[2rem] font-black text-lg uppercase tracking-[0.2em] shadow-xl transition-all active:scale-95 flex items-center justify-center gap-4 ${accessToken ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-100' : 'bg-gray-100 text-gray-400'}`}
-              >
-                {isSaving ? <Loader2 className="animate-spin" /> : <><Save size={20} /> Opslaan naar Google Drive</>}
-              </button>
-              {!accessToken && (
-                <p className="text-center text-rose-500 text-[10px] font-black uppercase tracking-widest mt-2">Log eerst in met Google om te kunnen opslaan.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 const EnergyWidget = ({ data, error, onTitleClick, onWidgetClick, apiUrl }: { data: EnergyData | null, error: string | null, onTitleClick: () => void, onWidgetClick: () => void, apiUrl: string }) => {
   const isEvCharging = data && data.ev.power > 100;
@@ -1866,7 +1630,6 @@ const App: React.FC = () => {
   const [energyLogs, setEnergyLogs] = useState<LogEntry[]>([]);
   const [showEnergyLogs, setShowEnergyLogs] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [spotifyConfig, setSpotifyConfig] = useState<SpotifyConfig | null>(null);
   const tokenClientRef = useRef<any>(null);
 
   const handleLogout = () => { 
@@ -1877,7 +1640,6 @@ const App: React.FC = () => {
     setGrantedScopes("");
     setUser(null); 
     setAgendaItems([]); 
-    setSpotifyConfig(null);
   };
   
   const handleLogin = (isReAuth = false) => { 
@@ -1934,7 +1696,6 @@ const App: React.FC = () => {
   const refreshAllUserData = async (token: string) => {
     await fetchUserProfile(token);
     await fetchCalendarEvents(token);
-    await fetchSpotifyConfig(token);
   };
 
   const fetchUserProfile = async (token: string) => { 
@@ -1957,6 +1718,8 @@ const App: React.FC = () => {
           const endDate = isAllDay ? new Date(endRaw + 'T00:00:00') : new Date(endRaw);
           
           let displayTitle = event.summary || '(Geen titel)';
+          let displayDescription = event.description || '';
+          
           if (!isAllDay) {
             displayTitle = displayTitle
               .replace(/\s*\d{1,2}[u:]\d{0,2}\s*-\s*\d{1,2}[u:]\d{0,2}/gi, '')
@@ -1965,47 +1728,52 @@ const App: React.FC = () => {
               .trim();
           }
 
+          const nameRules = [
+            { name: 'Joosefien', color: '#E57C73' },
+            { name: 'Viktor', color: '#10B981' },
+            { name: 'Papa', color: '#F4511E' },
+            { name: 'Mama', color: '#660066' }
+          ];
+
+          // Zoek alle unieke namen uit de regels die voorkomen in de titel
+          const foundNamesInTitle = nameRules.filter(rule => 
+            displayTitle.toLowerCase().includes(rule.name.toLowerCase())
+          );
+
+          let finalTitle = displayTitle;
+          let finalDescription = displayDescription;
+          let textColor = undefined;
+
+          // Pas alleen aan als er precies één naamtype gevonden is
+          if (foundNamesInTitle.length === 1) {
+            const rule = foundNamesInTitle[0];
+            textColor = rule.color;
+            
+            // Gebruik regex met word boundaries (\b) om exact de naam te matchen
+            // We gebruiken een case-insensitive match (i)
+            const regex = new RegExp(`\\b${rule.name}\\b`, 'gi');
+            
+            finalTitle = finalTitle.replace(regex, '').trim().replace(/\s+/g, ' ');
+            finalDescription = finalDescription.replace(regex, '').trim().replace(/\s+/g, ' ');
+          }
+
           return { 
             id: event.id, 
             start: startDate, 
             end: endDate, 
-            title: displayTitle, 
+            title: finalTitle || '(Geen titel)', 
             color: GOOGLE_COLOR_MAP[event.colorId] || '#10b981', 
             isAllDay, 
             htmlLink: event.htmlLink,
             allDayStartStr: isAllDay ? startRaw : undefined,
-            allDayEndStr: isAllDay ? endRaw : undefined
+            allDayEndStr: isAllDay ? endRaw : undefined,
+            textColor: textColor,
+            description: finalDescription
           }; 
         }); 
         setAgendaItems(mapped); 
       }
     } catch (e) { console.error(e); } finally { setAgendaLoading(false); } 
-  };
-
-  const fetchSpotifyConfig = async (token: string) => {
-    try {
-      const searchResp = await fetch("https://www.googleapis.com/drive/v3/files?q=name='WalboFamiilyConfig.txt' and trashed=false", {
-        headers: { Authorization: 'Bearer ' + token }
-      });
-      if (!searchResp.ok) return;
-      const searchData = await searchResp.json();
-      if (searchData.files && searchData.files.length > 0) {
-        const fileId = searchData.files[0].id;
-        const fileResp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-          headers: { Authorization: 'Bearer ' + token }
-        });
-        if (!fileResp.ok) return;
-        const configData = await fileResp.json();
-        if (configData?.connections?.spotify) {
-          setSpotifyConfig({
-            username: configData.connections.spotify.username,
-            password_b64: configData.connections.spotify.password_b64
-          });
-        }
-      }
-    } catch (e) {
-      console.error("Failed to fetch Spotify config from Drive", e);
-    }
   };
 
   async function fetchWeatherForecast(triggerOverlay = true) { 
@@ -2132,9 +1900,9 @@ const App: React.FC = () => {
         </section>
         <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar">
           <EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={ENERGY_ENDPOINT} />
+          <SpotifyWidget nodeRedBaseUrl={NODERED_BASE_URL} />
           <TimerWidget />
           <GeminiAssistantWidget />
-          <SpotifyWidget config={spotifyConfig} accessToken={accessToken} onRefreshConfig={() => accessToken && fetchSpotifyConfig(accessToken)} />
         </aside>
       </main>
 
