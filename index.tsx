@@ -17,7 +17,7 @@ import {
   Fish, Salad, Hamburger, Download, Upload
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
-import { SpotifyWidget } from './SpotifyWidget';
+import { MusicWidget } from './MusicWidget';
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
@@ -425,7 +425,7 @@ const GeminiAssistantWidget = () => {
                 <li className="flex gap-4 items-start">
                   <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
                   <p className="text-xs text-gray-600 font-medium leading-normal">
-                    Gebruik een sleutel uit een project binnen je <strong>betaalde organisatie</strong>. Gratis keys werken niet for Live Voice.
+                    Gebruik een sleutel uit een project binnen je <strong>betaalde organisatie</strong>. Gratis keys werken niet voor Live Voice.
                   </p>
                 </li>
               </ul>
@@ -827,7 +827,7 @@ const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: strin
 
   const fetchSessionItems = async (sessionId: string) => {
     try {
-      addLog(`Media items ophalen for sessie: ${sessionId}`, 'info');
+      addLog(`Media items ophalen voor sessie: ${sessionId}`, 'info');
       const response = await fetch(`https://photospicker.googleapis.com/v1/mediaItems?sessionId=${sessionId}`, {
         headers: { Authorization: 'Bearer ' + accessToken }
       });
@@ -1640,6 +1640,7 @@ const App: React.FC = () => {
     setGrantedScopes("");
     setUser(null); 
     setAgendaItems([]); 
+    setSpotifyConfig(null);
   };
   
   const handleLogin = (isReAuth = false) => { 
@@ -1900,9 +1901,9 @@ const App: React.FC = () => {
         </section>
         <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar">
           <EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={ENERGY_ENDPOINT} />
-          <SpotifyWidget nodeRedBaseUrl={NODERED_BASE_URL} />
           <TimerWidget />
           <GeminiAssistantWidget />
+          <MusicWidget nodeRedBaseUrl={NODERED_BASE_URL} />
         </aside>
       </main>
 
