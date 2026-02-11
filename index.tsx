@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
-  Cloud, Sun, CloudRain, CloudLightning, Wind, X, 
+  Cloud, Sun, CloudRain, CloudLightning, Wind, X, Flower2,
   Clock, Calendar as CalendarIcon, 
   CloudSnow, CloudDrizzle, Loader2, RefreshCw,
   CheckCircle2, Bell, Copy, Zap, Battery as BatteryIcon, 
@@ -17,7 +17,10 @@ import {
   Fish, Salad, Hamburger, Download, Upload
 } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
-import { MusicWidget } from './MusicWidget';
+import { MusicWidget }        from './MusicWidget';
+import { WeekAgendaWidget }   from './WeekAgendaWidget';
+import { GooglePhotosWidget } from './GooglePhotosWidget';
+import { PollenWidget }       from './PollenWidget';
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
@@ -652,854 +655,10 @@ const WeatherOverlay = ({ onClose, weatherData, loading }: any) => {
   );
 };
 
-const GooglePhotosWidget = ({ accessToken, onForceLogout }: { accessToken: string | null, onForceLogout: () => void }) => {
-  const [photos, setPhotos] = useState<any[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [isPicking, setIsPicking] = useState(false);
-  const [showPhotosLog, setShowPhotosLog] = useState(false);
-  const [photosLogs, setPhotosLogs] = useState<LogEntry[]>([]);
-  const hasHydratedRef = useRef(false);
-  const hasLoadedFromDBRef = useRef(false);
-
-  const addLog = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
-    const timestamp = new Date().toLocaleTimeString('nl-BE', { hour12: false });
-    setPhotosLogs(prev => [...prev, { timestamp, msg, type }].slice(-100));
-  };
-
-  // Load photos from IndexedDB on mount
-  useEffect(() => {
-    const loadPhotosFromDB = async () => {
-      if (hasLoadedFromDBRef.current) return;
-      hasLoadedFromDBRef.current = true;
-      
-      try {
-        const storedPhotos = await getAllPhotosFromIndexedDB();
-        if (storedPhotos.length > 0) {
-          addLog(`${storedPhotos.length} foto's geladen uit IndexedDB`, 'success');
-          setPhotos(storedPhotos);
-        }
-      } catch (e: any) {
-        addLog(`Fout bij laden uit IndexedDB: ${e.message}`, 'error');
-      }
-    };
-    
-    loadPhotosFromDB();
-  }, []);
-
-  const extractUri = (item: any) => {
-    // Robust search for any baseUrl or mediaUri in nested structures
-    const uri = item.mediaFile?.baseUrl || 
-           item.preview?.baseUrl ||
-           item.mediaFileUri || 
-           item.previewUri || 
-           item.mediaItem?.mediaFile?.baseUrl ||
-           item.mediaItem?.preview?.baseUrl ||
-           item.mediaItem?.mediaFileUri || 
-           item.mediaItem?.previewUri || 
-           item.baseUrl;
-    
-    return uri;
-  };
-
-  const extractFilename = (item: any) => {
-    return item.mediaFile?.filename || 
-           item.preview?.filename || 
-           item.mediaItem?.mediaFile?.filename || 
-           item.mediaItem?.preview?.filename ||
-           item.filename || 
-           "Foto";
-  };
-
-  const fetchImageAsBlobUrl = async (uri: string): Promise<{ blobUrl: string; blobData: string }> => {
-    if (!accessToken) throw new Error("Geen access token");
-    
-    // Request original quality from googleusercontent if applicable
-    let finalUri = uri;
-    if (uri.includes('googleusercontent.com') && !uri.includes('=')) {
-      finalUri = uri + '=d';
-    }
-    
-    const response = await fetch(finalUri, {
-      headers: { Authorization: 'Bearer ' + accessToken }
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const blob = await response.blob();
-    if (blob.size < 100) throw new Error("Onvoldoende data in blob");
-    
-    // Convert blob to base64 for IndexedDB storage
-    const blobData = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    
-    const blobUrl = URL.createObjectURL(blob);
-    return { blobUrl, blobData };
-  };
-
-  // Effect to regenerate blob URLs from stored blob data on mount
-  useEffect(() => {
-    const regenerateBlobUrls = () => {
-      if (photos.length === 0) return;
-      
-      const photosNeedingUrls = photos.filter(p => p.blobData && !p.blobUrl);
-      if (photosNeedingUrls.length > 0) {
-        addLog(`Bezig met regenereren van ${photosNeedingUrls.length} blob URLs...`, 'info');
-        
-        const updatedPhotos = photos.map(photo => {
-          if (photo.blobData && !photo.blobUrl) {
-            // Convert base64 back to blob URL
-            const blob = dataURLToBlob(photo.blobData);
-            const blobUrl = URL.createObjectURL(blob);
-            return { ...photo, blobUrl };
-          }
-          return photo;
-        });
-        
-        setPhotos(updatedPhotos);
-        addLog(`Blob URLs geregenereerd`, 'success');
-      }
-    };
-
-    regenerateBlobUrls();
-  }, [photos.length]);
-
-  const dataURLToBlob = (dataURL: string): Blob => {
-    const arr = dataURL.split(',');
-    const mime = arr[0].match(/:(.*?);/)![1];
-    const bstr = atob(arr[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    return new Blob([u8arr], { type: mime });
-  };
-
-  const createPickerSession = async () => {
-    if (!accessToken) return;
-    setLoading(true);
-    addLog("Starten van een nieuwe Google Photos Picker sessie...", 'info');
-    try {
-      const response = await fetch('https://photospicker.googleapis.com/v1/sessions', {
-        method: 'POST',
-        headers: { 
-          'Authorization': 'Bearer ' + accessToken,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ })
-      });
-      const data = await response.json();
-      if (data.pickerUri) {
-        addLog(`Picker sessie aangemaakt. ID: ${data.id}. URI: ${data.pickerUri}`, 'success');
-        setIsPicking(true);
-        const pickerWindow = window.open(data.pickerUri, '_blank');
-        
-        const pollTimer = setInterval(async () => {
-          try {
-            const checkResp = await fetch(`https://photospicker.googleapis.com/v1/sessions/${data.id}`, {
-              headers: { Authorization: 'Bearer ' + accessToken }
-            });
-            const checkData = await checkResp.json();
-            addLog(`Polling sessie ${data.id} - Status mediaItemsSet: ${checkData.mediaItemsSet}`, 'info');
-            if (checkData.mediaItemsSet) {
-              clearInterval(pollTimer);
-              addLog("Gebruiker heeft foto's geselecteerd. Items ophalen...", 'success');
-              await fetchSessionItems(data.id);
-              if (pickerWindow) pickerWindow.close();
-              setIsPicking(false);
-            }
-          } catch (e: any) {
-            addLog(`Fout tijdens polling: ${e.message}`, 'error');
-          }
-        }, 3000);
-      } else {
-        addLog(`Kon pickerUri niet vinden in response.`, 'error');
-      }
-    } catch (e: any) {
-      addLog(`Picker Session Error: ${e.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchSessionItems = async (sessionId: string) => {
-    try {
-      addLog(`Media items ophalen voor sessie: ${sessionId}`, 'info');
-      const response = await fetch(`https://photospicker.googleapis.com/v1/mediaItems?sessionId=${sessionId}`, {
-        headers: { Authorization: 'Bearer ' + accessToken }
-      });
-      const data = await response.json();
-      if (data.mediaItems && data.mediaItems.length > 0) {
-        addLog(`${data.mediaItems.length} media items gevonden. Downloaden...`, 'info');
-
-        const processedItems = await Promise.all(data.mediaItems.map(async (item: any) => {
-          try {
-            const uri = extractUri(item);
-            if (!uri) throw new Error("Item heeft geen media URI");
-            
-            const filename = extractFilename(item);
-            const { blobUrl, blobData } = await fetchImageAsBlobUrl(uri);
-            
-            const photoItem = { 
-              ...item, 
-              filename,
-              blobUrl,
-              blobData // Store base64 data for persistence
-            };
-            
-            // Save to IndexedDB
-            await savePhotoToIndexedDB(photoItem);
-            
-            return photoItem;
-          } catch (e: any) {
-            addLog(`Download fout: ${e.message}`, 'error');
-            return null;
-          }
-        }));
-
-        const finalItems = processedItems.filter(item => item !== null);
-        addLog(`${finalItems.length} foto's opgeslagen in IndexedDB`, 'success');
-        
-        const newPhotos = [...photos, ...finalItems];
-        setPhotos(newPhotos);
-      } else {
-        addLog(`Geen media items gevonden in response of lijst is leeg.`, 'error');
-      }
-    } catch (e: any) {
-      addLog(`Fetch Items Error: ${e.message}`, 'error');
-    }
-  };
-
-  const clearSlideshow = async () => {
-    addLog("Slideshow wissen...", 'info');
-    photos.forEach(photo => {
-      if (photo.blobUrl) URL.revokeObjectURL(photo.blobUrl);
-    });
-    setPhotos([]);
-    setCurrentIndex(0);
-    
-    try {
-      await clearAllPhotosFromIndexedDB();
-      addLog("Slideshow gewist uit IndexedDB", 'success');
-    } catch (e: any) {
-      addLog(`Fout bij wissen: ${e.message}`, 'error');
-    }
-  };
-
-  const downloadBackup = async () => {
-    try {
-      addLog("Backup maken...", 'info');
-      const photosToBackup = await getAllPhotosFromIndexedDB();
-      
-      if (photosToBackup.length === 0) {
-        addLog("Geen foto's om te backuppen", 'error');
-        return;
-      }
-
-      const backup = {
-        version: 1,
-        timestamp: new Date().toISOString(),
-        photos: photosToBackup
-      };
-
-      const json = JSON.stringify(backup);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `slideshow-backup-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      addLog(`Backup van ${photosToBackup.length} foto's gedownload`, 'success');
-    } catch (e: any) {
-      addLog(`Backup fout: ${e.message}`, 'error');
-    }
-  };
-
-  const restoreBackup = async (file: File) => {
-    try {
-      addLog("Backup herstellen...", 'info');
-      
-      const text = await file.text();
-      const backup = JSON.parse(text);
-      
-      if (!backup.photos || !Array.isArray(backup.photos)) {
-        throw new Error("Ongeldig backup formaat");
-      }
-
-      // Clear existing photos
-      await clearAllPhotosFromIndexedDB();
-      photos.forEach(photo => {
-        if (photo.blobUrl) URL.revokeObjectURL(photo.blobUrl);
-      });
-
-      // Save all photos to IndexedDB
-      for (const photo of backup.photos) {
-        await savePhotoToIndexedDB(photo);
-      }
-
-      // Convert blobData to blobUrls
-      const restoredPhotos = backup.photos.map((photo: any) => {
-        if (photo.blobData) {
-          const blob = dataURLToBlob(photo.blobData);
-          const blobUrl = URL.createObjectURL(blob);
-          return { ...photo, blobUrl };
-        }
-        return photo;
-      });
-
-      setPhotos(restoredPhotos);
-      setCurrentIndex(0);
-      
-      addLog(`${backup.photos.length} foto's hersteld uit backup`, 'success');
-    } catch (e: any) {
-      addLog(`Restore fout: ${e.message}`, 'error');
-    }
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      restoreBackup(file);
-    }
-  };
-
-  useEffect(() => {
-    if (photos.length === 0) return;
-    const interval = setInterval(() => {
-      setCurrentIndex(prev => (prev + 1) % photos.length);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [photos.length]);
-
-  if (loading) return (
-    <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center">
-      <Loader2 className="w-12 h-12 text-blue-400 animate-spin" />
-      <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest">Sessie starten...</p>
-    </div>
-  );
-
-  if (isPicking) return (
-    <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center text-center">
-      <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
-        <ImageIcon size={40} className="text-blue-400" />
-      </div>
-      <h3 className="text-xl font-black text-gray-800 uppercase tracking-tight mb-2">Foto's aan het kiezen...</h3>
-      <p className="text-sm text-gray-500 mb-8 max-w-xs">Ga naar het geopende tabblad om foto's voor je slideshow te selecteren.</p>
-      <div className="flex items-center gap-3 px-6 py-3 bg-blue-50 text-blue-600 rounded-full border border-blue-100">
-         <Loader2 size={16} className="animate-spin" />
-         <span className="text-[10px] font-black uppercase tracking-widest">Wachten op selectie</span>
-      </div>
-    </div>
-  );
-
-  if (photos.length === 0) return (
-    <div className="bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col h-full items-center justify-center text-center">
-      <div className="w-20 h-20 bg-gray-50 rounded-3xl flex items-center justify-center mb-6">
-        <ImageIcon size={32} className="text-gray-300" />
-      </div>
-      <h3 className="text-lg font-black text-gray-800 uppercase tracking-tight mb-2">Slideshow Leeg</h3>
-      <p className="text-sm text-gray-400 mb-10 max-w-xs">Gebruik de Google Photos Picker om foto's te kiezen of herstel een backup.</p>
-      <div className="flex flex-col gap-4">
-        <button onClick={createPickerSession} className="px-12 py-6 bg-indigo-600 text-white rounded-[2rem] text-[13px] font-black uppercase tracking-[0.2em] shadow-2xl hover:bg-indigo-700 transition-all active:scale-95 flex items-center justify-center gap-3">
-          <Plus size={20} /> Foto's Kiezen
-        </button>
-        <label className="px-12 py-6 bg-gray-100 text-gray-700 rounded-[2rem] text-[13px] font-black uppercase tracking-[0.2em] hover:bg-gray-200 transition-all active:scale-95 flex items-center justify-center gap-3 cursor-pointer">
-          <Upload size={20} /> Backup Herstellen
-          <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
-        </label>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="bg-black rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-full max-h-[1200px] overflow-hidden relative group">
-      <div className="absolute inset-0 rounded-[3rem] overflow-hidden">
-        {photos.map((photo, idx) => {
-            if (!photo.blobUrl) return null;
-            
-            return (
-              <div 
-                key={photo.id + idx} 
-                className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${idx === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
-              >
-                <img 
-                  src={photo.blobUrl} 
-                  alt={photo.filename || "Foto"} 
-                  className="w-full h-full object-cover" 
-                  onError={() => {
-                    addLog(`Laadfout voor ${photo.filename || 'item'}`, 'error');
-                  }}
-                  onLoad={() => {
-                    if (idx === currentIndex) addLog(`Zichtbaar: ${photo.filename || 'item'}`, 'success');
-                  }}
-                />
-              </div>
-            );
-          })}
-      </div>
-      
-      {/* Overlay controls and metadata */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10 pointer-events-none z-20" />
-      
-      <div className="absolute top-10 right-10 flex gap-4 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-        <button onClick={createPickerSession} className="h-14 px-6 bg-white/20 backdrop-blur-md rounded-2xl flex items-center gap-3 text-white hover:bg-white/40 transition-colors">
-          <Plus size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Toevoegen</span>
-        </button>
-        <button onClick={downloadBackup} title="Backup downloaden" className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-emerald-400 hover:bg-white/40 transition-colors">
-          <Download size={18} />
-        </button>
-        <label title="Backup herstellen" className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-blue-400 hover:bg-white/40 transition-colors cursor-pointer">
-          <Upload size={18} />
-          <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
-        </label>
-        <button onClick={clearSlideshow} title="Slideshow wissen" className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-rose-400 hover:bg-white/40 transition-colors">
-          <Trash2 size={18} />
-        </button>
-        <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-white">
-          <ImageIcon size={20} />
-        </div>
-      </div>
-
-      <div className="absolute bottom-10 left-10 text-white flex flex-col gap-1 z-30">
-        <button 
-          onClick={() => setShowPhotosLog(true)}
-          className="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 hover:opacity-100 transition-opacity text-left cursor-help flex items-center gap-2"
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          Slideshow • {photos.length} Foto's
-        </button>
-        <span className="text-xs font-bold truncate max-w-sm pointer-events-none">
-          {photos[currentIndex]?.filename || "Laden..."}
-        </span>
-      </div>
-
-      {showPhotosLog && (
-        <div className="fixed inset-0 z-[1200] flex items-center justify-center animate-in fade-in bg-black/90 backdrop-blur-md p-10">
-          <div className="bg-[#1a1a1a] w-full max-w-3xl h-[90vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
-            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center">
-              <div className="flex items-center gap-4 text-blue-400">
-                <ImageIcon size={24} />
-                <h3 className="font-black text-xs uppercase tracking-[0.4em]">Google Photos Debug Log</h3>
-              </div>
-              <div className="flex items-center gap-4">
-                <button onClick={() => { const text = photosLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all">
-                  <Copy size={18} />
-                </button>
-                <button onClick={() => setPhotosLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all">
-                  <Trash2 size={18} />
-                </button>
-                <button onClick={() => setShowPhotosLog(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all">
-                  <X size={24} />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-8 space-y-2 font-mono text-[10px] scroll-smooth no-scrollbar">
-              {photosLogs.length === 0 ? (
-                <div className="h-full flex items-center justify-center opacity-20 text-white font-black uppercase tracking-widest">Geen logs</div>
-              ) : photosLogs.map((log, i) => (
-                <div key={i} className={`flex gap-4 border-b border-white/5 pb-2 last:border-0 ${log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}`}>
-                  <span className="opacity-40 whitespace-nowrap">[{log.timestamp}]</span>
-                  <span className="font-bold whitespace-nowrap">[{log.type.toUpperCase()}]</span>
-                  <span className="text-white opacity-80 break-all">{log.msg}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const Calendar = ({ accessToken, items, isLoading, solarData, onRefresh, isCollapsed, onToggleCollapse }: { accessToken: string | null; items: AgendaItem[]; isLoading: boolean; solarData: SolarDataResponse | null; onRefresh: () => void; isCollapsed: boolean; onToggleCollapse: () => void; }) => {
-  const [selectedTimezone, setSelectedTimezone] = useState<string>('Europe/Brussels');
-  const [showWeekPicker, setShowWeekPicker] = useState(false);
-  const [selectedWeekType, setSelectedWeekType] = useState<'rolling' | Date>('rolling');
-  const [activeFoodAdd, setActiveFoodAdd] = useState<string | null>(null);
-  const [isAddingFood, setIsAddingFood] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<AgendaItem | null>(null);
-
-  const weekOptions = useMemo(() => {
-    const options: { type: 'rolling' | Date; label: string }[] = [{ type: 'rolling', label: 'Komende 7 dagen' }];
-    const baseDate = new Date();
-    const day = baseDate.getDay();
-    const diff = baseDate.getDate() - day + (day === 0 ? -6 : 1);
-    const firstMonday = new Date(baseDate.setDate(diff));
-    firstMonday.setHours(0, 0, 0, 0);
-
-    for (let i = 0; i < 12; i++) {
-      const mon = new Date(firstMonday);
-      mon.setDate(mon.getDate() + i * 7);
-      const sun = new Date(mon);
-      sun.setDate(sun.getDate() + 6);
-      
-      const label = `${mon.getDate().toString().padStart(2, '0')}/${(mon.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getDate() + 1).toString().padStart(2, '0')}`;
-      options.push({ type: mon, label });
-    }
-    return options;
-  }, []);
-
-  const weekDays = useMemo(() => {
-    if (selectedWeekType === 'rolling') {
-      return Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() + i);
-        return d;
-      });
-    } else {
-      const baseDate = selectedWeekType;
-      return Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(baseDate);
-        d.setDate(d.getDate() + i);
-        return d;
-      });
-    }
-  }, [selectedWeekType]);
-  
-  const getEventsForDay = (date: Date) => {
-    const dayStr = date.toLocaleDateString('en-CA', { timeZone: selectedTimezone });
-    return items.filter(item => { 
-      if (item.isAllDay && item.allDayStartStr && item.allDayEndStr) {
-        return dayStr >= item.allDayStartStr && dayStr < item.allDayEndStr;
-      }
-      const startDayStr = item.start.toLocaleDateString('en-CA', { timeZone: selectedTimezone });
-      const endDayStr = new Date(item.end.getTime() - 1).toLocaleDateString('en-CA', { timeZone: selectedTimezone });
-      return dayStr >= startDayStr && dayStr <= endDayStr;
-    });
-  };
-
-  const getSolarForecastForDay = (date: Date) => {
-    if (!solarData?.solar) return null;
-    const dStr = date.getDate().toString().padStart(2, '0') + '/' + (date.getMonth() + 1).toString().padStart(2, '0') + '/' + date.getFullYear();
-    // Search for a forecast entry with this date
-    return Object.values(solarData.solar).find(item => item.date === dStr && item.description.includes('estimated'));
-  };
-
-  const toggleTimezone = () => {
-    setSelectedTimezone(prev => prev === 'UTC' ? 'Europe/Brussels' : 'UTC');
-  };
-
-  const isWaste = (title: string) => ['PMD', 'RA', 'P/K', 'GLA'].includes(title.trim().toUpperCase());
-  
-  const isFood = (title: string) => title.trim().toLowerCase().startsWith('eten');
-
-  const getFoodIcon = (title: string) => {
-    const t = title.toLowerCase();
-    if (t.includes('burger')) return <Hamburger size={24} className="text-indigo-400" />;
-    if (t.includes('pizza')) return <Pizza size={24} className="text-orange-500" />;
-    if (t.includes('friet')) return <ChefHat size={24} className="text-amber-500" />;
-    if (t.includes('taco')) return <ChefHat size={24} className="text-yellow-600" />;
-    if (t.includes('wrap')) return <Sandwich size={24} className="text-yellow-500" />;
-    if (t.includes('spaghetti')) return <Soup size={24} className="text-rose-500" />;
-    if (t.includes('spinazie')) return <Salad size={24} className="text-emerald-500" />;
-    if (t.includes('kip')) return <Drumstick size={24} className="text-orange-400" />;
-    if (t.includes('croque')) return <Sandwich size={24} className="text-amber-600" />;
-    if (t.includes('sushi')) return <Fish size={24} className="text-indigo-400" />;
-    if (t.includes('vis')) return <Fish size={24} className="text-indigo-400" />;
-    if (t.includes('soep')) return <Soup size={24} className="text-rose-500" />;
-    return <Utensils size={20} className="text-gray-300" />;
-  };
-
-  const addFoodToCalendar = async (date: Date, dish: string) => {
-    if (!accessToken) return;
-    setIsAddingFood(true);
-    try {
-      const startStr = date.toISOString().split('T')[0];
-      const nextDay = new Date(date);
-      nextDay.setDate(nextDay.getDate() + 1);
-      const endStr = nextDay.toISOString().split('T')[0];
-
-      const resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-        method: 'POST',
-        headers: { 
-          'Authorization': 'Bearer ' + accessToken,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          summary: `Eten ${dish}`,
-          start: { date: startStr },
-          end: { date: endStr }
-        })
-      });
-
-      if (!resp.ok) throw new Error('Kon evenement niet toevoegen');
-      onRefresh();
-    } catch (e) {
-      console.error(e);
-      alert('Fout bij toevoegen aan kalender');
-    } finally {
-      setIsAddingFood(false);
-      setActiveFoodAdd(null);
-    }
-  };
-
-  const deleteFoodFromCalendar = async () => {
-    if (!accessToken || !itemToDelete) return;
-    try {
-      const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${itemToDelete.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + accessToken }
-      });
-      if (!resp.ok) throw new Error('Kon item niet verwijderen');
-      onRefresh();
-    } catch (e) {
-      console.error(e);
-      alert('Fout bij verwijderen uit kalender');
-    } finally {
-      setItemToDelete(null);
-    }
-  };
-
-  const currentLabel = useMemo(() => {
-    if (selectedWeekType === 'rolling') return 'Komende 7 dagen';
-    const sun = new Date(selectedWeekType);
-    sun.setDate(sun.getDate() + 6);
-    return `${selectedWeekType.getDate().toString().padStart(2, '0')}/${(selectedWeekType.getMonth() + 1).toString().padStart(2, '0')} - ${sun.getDate().toString().padStart(2, '0')}/${(sun.getDate() + 1).toString().padStart(2, '0')}`;
-  }, [selectedWeekType]);
-
-  return (
-    <div className={`bg-white rounded-[3rem] p-10 shadow-sm border border-gray-100 flex flex-col transition-all duration-500 overflow-hidden relative ${isCollapsed ? 'h-auto' : 'h-full'}`}>
-      <div className="flex justify-between items-center shrink-0 mb-4">
-        <div className="flex items-center gap-6">
-          <h2 className="text-4xl font-light text-gray-800 tracking-tight">Week Agenda</h2>
-          {!isCollapsed && accessToken && !isLoading && ( 
-            <button onClick={onRefresh} className="flex items-center gap-3 px-4 py-2 bg-blue-50 text-[11px] text-blue-600 font-black rounded-full uppercase tracking-widest border border-blue-100 hover:bg-blue-100">
-              <RefreshCw size={12} className={isLoading ? "animate-spin" : ""} /> Verversen
-            </button> 
-          )}
-        </div>
-        <div className="absolute left-1/2 -translate-x-1/2 top-10 z-10">
-          <button 
-            onClick={toggleTimezone}
-            className="flex items-center gap-3 px-6 py-3 bg-gray-50 border border-gray-100 rounded-full hover:bg-gray-100 transition-all active:scale-95 shadow-sm"
-          >
-            <Globe size={14} className="text-blue-500" />
-            <span className="text-[12px] font-black text-gray-700 uppercase tracking-widest">
-              {selectedTimezone === 'UTC' ? 'UTC' : 'Brussels (CET)'}
-            </span>
-          </button>
-        </div>
-        <div className="flex items-center gap-8">
-          <div className="relative">
-            <button 
-              onClick={() => setShowWeekPicker(!showWeekPicker)}
-              className="text-[11px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-indigo-500 transition-colors py-2"
-            >
-              {currentLabel}
-              <ChevronDown size={14} className={`transition-transform ${showWeekPicker ? 'rotate-180' : ''}`} />
-            </button>
-            
-            {showWeekPicker && (
-              <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-gray-100 rounded-[1.5rem] shadow-2xl z-[100] p-2 animate-in fade-in zoom-in-95 duration-200">
-                <div className="max-h-[350px] overflow-y-auto no-scrollbar">
-                  {weekOptions.map((opt, i) => (
-                    <button 
-                      key={i}
-                      onClick={() => {
-                        setSelectedWeekType(opt.type);
-                        setShowWeekPicker(false);
-                      }}
-                      className={`w-full text-left px-5 py-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-between group ${
-                        (opt.type === 'rolling' && selectedWeekType === 'rolling') || 
-                        (opt.type instanceof Date && selectedWeekType instanceof Date && opt.type.getTime() === selectedWeekType.getTime()) 
-                        ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-50 text-gray-400 hover:text-gray-700'
-                      }`}
-                    >
-                      {opt.label}
-                      <ChevronRight size={14} className={`opacity-0 group-hover:opacity-100 transition-opacity ${
-                        (opt.type === 'rolling' && selectedWeekType === 'rolling') || 
-                        (opt.type instanceof Date && selectedWeekType instanceof Date && opt.type.getTime() === selectedWeekType.getTime()) 
-                        ? 'opacity-100' : ''}`} 
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <button onClick={onToggleCollapse} className="w-12 h-12 flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-400 rounded-2xl transition-all active:scale-90">
-            {isCollapsed ? <ChevronDown size={24} /> : <ChevronUp size={24} />}
-          </button>
-        </div>
-      </div>
-      {!isCollapsed && ( 
-        <div className="flex-1 overflow-hidden mt-6 animate-in fade-in">
-          {!accessToken ? ( 
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-8 px-10 opacity-40">
-              <div className="w-24 h-24 bg-blue-50 rounded-[2.5rem] flex items-center justify-center mb-2"><CalendarIcon className="w-12 h-12 text-blue-300" /></div>
-              <p className="text-gray-500 text-xl font-medium max-w-sm">Synchroniseer met Google Agenda om je weekplanning te zien</p>
-            </div> 
-          ) : isLoading ? ( 
-            <div className="h-full flex flex-col items-center justify-center space-y-8">
-              <Loader2 className="w-16 h-16 text-blue-400 animate-spin" />
-              <p className="text-xs text-gray-400 font-black uppercase tracking-[0.4em] animate-pulse">Agenda ophalen...</p>
-            </div> 
-          ) : ( 
-            <div className="grid grid-cols-7 h-full gap-px bg-gray-100 border border-gray-100 rounded-[2.5rem] overflow-hidden">
-              {weekDays.map((date, idx) => { 
-                const dayEvents = getEventsForDay(date); 
-                const wasteEvents = dayEvents.filter(e => isWaste(e.title));
-                const foodEvents = dayEvents.filter(e => isFood(e.title));
-                const regularEvents = dayEvents.filter(e => !isWaste(e.title) && !isFood(e.title));
-                const solarForecast = getSolarForecastForDay(date);
-                const today = new Date().toDateString() === date.toDateString(); 
-                const dateKey = date.toISOString().split('T')[0];
-
-                return ( 
-                  <div key={idx} className={`bg-white flex flex-col min-w-0 ${today ? 'bg-blue-50/20' : ''} relative`}>
-                    <div className={`p-6 text-center border-b border-gray-50 shrink-0 ${today ? 'bg-blue-500/5' : ''}`}>
-                      <div className={`text-[11px] font-black tracking-widest ${today ? 'text-blue-600' : 'text-gray-400'}`}>
-                        {date.toLocaleDateString('nl-BE', { weekday: 'short' }).toUpperCase()}
-                      </div>
-                      <div className="flex items-center justify-center gap-2 mt-1">
-                        <div className={`text-3xl font-black ${today ? 'text-blue-600' : 'text-gray-800'}`}>{date.getDate()}</div>
-                        {wasteEvents.length > 0 && (
-                          <div className="flex items-center gap-1">
-                            {wasteEvents.map(w => {
-                              const t = w.title.trim().toUpperCase();
-                              if (t === 'PMD') return <Recycle key={w.id} size={20} className="text-blue-500" strokeWidth={2.5} />;
-                              if (t === 'RA') return <Trash2 key={w.id} size={20} className="text-gray-400" strokeWidth={2.5} />;
-                              if (t === 'P/K') return <Package key={w.id} size={20} className="text-amber-500" strokeWidth={2.5} />;
-                              if (t === 'GLA') return <Wine key={w.id} size={20} className="text-blue-600" strokeWidth={2.5} />;
-                              return null;
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="flex-1 overflow-y-auto p-0 space-y-0.5 no-scrollbar">
-                      {regularEvents.sort((a,b) => (a.isAllDay ? -1 : 1) - (b.isAllDay ? -1 : 1)).map(item => ( 
-                        <div 
-                          key={item.id + date.toISOString()} 
-                          onClick={() => window.open(item.htmlLink, '_blank')} 
-                          style={item.isAllDay ? { backgroundColor: item.color || '#9ca3af' } : {}} 
-                          className={`w-full cursor-pointer hover:brightness-95 active:scale-[0.98] transition-all ${
-                            item.isAllDay 
-                              ? 'p-0.5 rounded-sm shadow-sm border border-black/5' 
-                              : 'px-0.5 py-2 bg-transparent'
-                          }`}
-                        >
-                          <div className={`flex flex-col ${!item.isAllDay ? 'text-black' : 'text-white'}`}>
-                            {!item.isAllDay && (
-                              <span className="text-[23px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
-                                {item.start.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
-                                {' - '}
-                                {item.end.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
-                              </span>
-                            )}
-                            <span 
-                              className="text-[30px] font-bold leading-tight line-clamp-3 pl-1 pr-1"
-                              style={item.textColor ? { color: item.textColor } : {}}
-                            >
-                              {item.title}
-                            </span>
-                          </div>
-                        </div> 
-                      ))} 
-                    </div>
-
-                    <div className="mt-auto border-t border-gray-100 bg-amber-50/10 p-4">
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Menu</span>
-                        {foodEvents.length > 0 ? foodEvents.map(f => {
-                          const displayFood = f.title.replace(/^Eten\s+/i, '');
-                          return (
-                            <div key={f.id} className="flex items-center gap-3 animate-in fade-in slide-in-from-bottom-1">
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setItemToDelete(f); }}
-                                className="hover:scale-110 active:scale-90 transition-transform cursor-pointer"
-                                title="Verwijder dit menu-item"
-                              >
-                                {getFoodIcon(f.title)}
-                              </button>
-                              <span className="text-[26px] font-black text-gray-800 tracking-tight leading-none">
-                                {displayFood}
-                              </span>
-                            </div>
-                          );
-                        }) : (
-                          <div className="relative">
-                            <button 
-                              onClick={() => setActiveFoodAdd(activeFoodAdd === dateKey ? null : dateKey)}
-                              className="w-full h-12 flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-400 rounded-xl transition-all active:scale-95 group"
-                            >
-                              <Plus size={24} className="group-hover:rotate-90 transition-transform" />
-                            </button>
-                            
-                            {activeFoodAdd === dateKey && (
-                              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-amber-100 rounded-2xl shadow-2xl z-50 p-2 animate-in zoom-in-95 fade-in duration-200">
-                                <div className="max-h-128 overflow-y-auto no-scrollbar grid grid-cols-1 gap-1">
-                                  {FOOD_OPTIONS.map(dish => (
-                                    <button
-                                      key={dish}
-                                      onClick={() => addFoodToCalendar(date, dish)}
-                                      disabled={isAddingFood}
-                                      className="w-full text-left px-4 py-3 rounded-xl hover:bg-amber-50 text-xs font-black text-amber-700 uppercase tracking-widest transition-all flex items-center justify-between"
-                                    >
-                                      {dish}
-                                      <div className="w-6 h-6 flex items-center justify-center opacity-40">
-                                        {getFoodIcon('Eten ' + dish)}
-                                      </div>
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Solar Yield Bottom Display */}
-                      {solarForecast && (
-                        <div className="mt-3 pt-3 border-t border-amber-200/40 flex items-center justify-between animate-in fade-in">
-                          <div className="flex items-center gap-2">
-                             <Sun size={14} className="text-amber-500 fill-amber-50" />
-                             <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest"></span>
-                          </div>
-                          <span className="text-sm font-black text-amber-700 tabular-nums">
-                            {solarForecast.value} <span className="text-[10px] opacity-60">kWh</span>
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div> 
-                ); 
-              })}
-            </div> 
-          )}
-        </div> 
-      )}
-
-      {itemToDelete && (
-        <div className="fixed inset-0 z-[1200] flex items-center justify-center animate-in fade-in duration-300 bg-black/60 backdrop-blur-sm p-10">
-          <div className="bg-white w-full max-w-sm p-10 rounded-[3rem] shadow-2xl flex flex-col items-center text-center">
-             <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[1.5rem] flex items-center justify-center mb-8">
-               <Trash2 size={32} />
-             </div>
-             <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest mb-4">Gerecht verwijderen?</h3>
-             <p className="text-sm text-gray-500 mb-10 leading-relaxed font-medium">Weet je zeker dat je <strong>{itemToDelete.title.replace(/^Eten\s+/i, '')}</strong> wilt verwijderen van de kalender?</p>
-             <div className="flex gap-4 w-full">
-                <button onClick={() => setItemToDelete(null)} className="flex-1 py-5 bg-gray-50 text-gray-400 hover:bg-gray-100 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Annuleren</button>
-                <button onClick={deleteFoodFromCalendar} className="flex-1 py-5 bg-rose-500 text-white hover:bg-rose-600 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-rose-100 transition-all">Verwijderen</button>
-             </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 
-const EnergyWidget = ({ data, error, onTitleClick, onWidgetClick, apiUrl }: { data: EnergyData | null, error: string | null, onTitleClick: () => void, onWidgetClick: () => void, apiUrl: string }) => {
+
+  const EnergyWidget = ({ data, error, onTitleClick, onWidgetClick, apiUrl }: { data: EnergyData | null, error: string | null, onTitleClick: () => void, onWidgetClick: () => void, apiUrl: string }) => {
   const isEvCharging = data && data.ev.power > 100;
   const isDcLoading = data && data.grid.dcPower > 100;
   const batteryStatus = data ? data.battery.status : '';
@@ -1619,7 +778,7 @@ const App: React.FC = () => {
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
   const [agendaLoading, setAgendaLoading] = useState(false);
   const [isAgendaCollapsed, setIsAgendaCollapsed] = useState(false);
-  const [activeMainView, setActiveMainView] = useState<'agenda' | 'photos'>('agenda');
+  const [showPhotos, setShowPhotos] = useState(false);
   const [isWeatherOpen, setIsWeatherOpen] = useState(false);
   const [weatherData, setWeatherData] = useState<WeatherData | null>(() => { const cached = localStorage.getItem(WEATHER_CACHE_KEY); return cached ? JSON.parse(cached) : null; });
   const [weatherLoading, setWeatherLoading] = useState(false);
@@ -1631,6 +790,7 @@ const App: React.FC = () => {
   const [showEnergyLogs, setShowEnergyLogs] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const tokenClientRef = useRef<any>(null);
+  const [showPollen, setShowPollen] = useState(false);
 
   const handleLogout = () => { 
     localStorage.removeItem('hub_access_token'); 
@@ -1876,37 +1036,60 @@ const App: React.FC = () => {
         {/* Right Section: Actions */}
         <div className="md:w-1/3 flex items-center justify-end gap-10 z-10">
           <div className="flex items-center gap-8">
-            {accessToken && ( <button onClick={() => setActiveMainView(activeMainView === 'agenda' ? 'photos' : 'agenda')} className={'w-16 h-16 border rounded-[2rem] shadow-xl flex items-center justify-center transition-all ' + (activeMainView === 'photos' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white border-gray-100 text-gray-400 hover:text-gray-900')}>{activeMainView === 'agenda' ? <ImageIcon size={24} /> : <CalendarIcon size={24} />}</button> )}
-            <button onClick={toggleFullScreen} className="w-16 h-16 bg-white border border-gray-100 rounded-[2rem] shadow-xl flex items-center justify-center text-gray-400 hover:text-gray-900">{isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}</button>
+            {accessToken && (
+				  <button 
+					onClick={() => setShowPhotos(!showPhotos)} 
+					className={'w-16 h-16 border rounded-[2rem] shadow-xl flex items-center justify-center transition-all ' + (showPhotos ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white border-gray-100 text-gray-400 hover:text-gray-900')}
+				  >
+					<ImageIcon size={24} />
+				  </button>
+				)} 
+			<button onClick={toggleFullScreen} className="w-16 h-16 bg-white border border-gray-100 rounded-[2rem] shadow-xl flex items-center justify-center text-gray-400 hover:text-gray-900">{isFullscreen ? <Minimize size={24} /> : <Maximize size={24} />}</button>
             {!accessToken ? (<button onClick={() => handleLogin()} disabled={isSyncing} className="px-12 py-6 bg-gray-900 text-white rounded-[2.5rem] text-[13px] font-black uppercase tracking-widest shadow-2xl">Google Sync</button>) : ( <div className="flex items-center gap-8 bg-white p-4 pr-10 rounded-[2.5rem] border border-gray-100 shadow-xl cursor-pointer" onClick={handleLogout}><div className="w-16 h-16 bg-gray-100 rounded-3xl overflow-hidden border border-gray-50"><img src={user?.picture} alt="" className="w-full h-full object-cover" /></div><div className="text-right"><div className="text-[13px] font-black text-gray-900 uppercase tracking-widest">{user?.name}</div><div className="text-[10px] text-green-500 font-bold flex items-center justify-end gap-2 mt-1"><CheckCircle2 size={12}/> ONLINE</div></div></div> )}
             <WeatherWidget data={weatherData} onClick={() => fetchWeatherForecast(true)} isRefreshing={weatherLoading} />
-          </div>
+			<button 
+			  onClick={() => setShowPollen(!showPollen)} 
+			  className={'w-16 h-16 border rounded-[2rem] shadow-xl flex items-center justify-center transition-all ' + (showPollen ? 'bg-green-600 border-green-500 text-white' : 'bg-white border-gray-100 text-gray-400 hover:text-gray-900')}
+			  title="Stuifmeel voorspelling"
+			>
+			  <Flower2 size={24} />
+			</button>
+		  </div>
         </div>
       </header>
-      <main className="w-full px-[50px] pt-3 pb-4 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
-        <section className="xl:col-span-7 h-full">
-          {activeMainView === 'agenda' ? ( 
-            <Calendar 
-              accessToken={accessToken} 
-              items={agendaItems} 
-              isLoading={agendaLoading} 
-              solarData={solarForecastData}
-              onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} 
-              isCollapsed={isAgendaCollapsed} 
-              onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} 
-            /> 
-          ) : ( 
-            <GooglePhotosWidget accessToken={accessToken} onForceLogout={handleLogout} /> 
-          )}
-        </section>
-        <aside className="xl:col-span-3 space-y-10 flex flex-col h-full overflow-y-auto no-scrollbar">
-          <EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={ENERGY_ENDPOINT} />
-          <TimerWidget />
-          <GeminiAssistantWidget />
-          <MusicWidget nodeRedBaseUrl={NODERED_BASE_URL} />
-        </aside>
-      </main>
-
+		<main className="w-full px-[50px] pt-3 pb-4 grid grid-cols-1 xl:grid-cols-10 gap-10 flex-1 overflow-hidden">
+		<section className="xl:col-span-7 flex flex-col gap-10">
+		  {/* Pollen Widget - Shows above everything when toggled on */}
+		  {showPollen && (
+			<PollenWidget onClose={() => setShowPollen(false)} />
+		  )}
+		  
+		  {/* Google Photos Widget - Shows above agenda when toggled on */}
+		  {accessToken && showPhotos && (
+			<GooglePhotosWidget 
+			  accessToken={accessToken} 
+			  onForceLogout={handleLogout} 
+			/>
+		  )}
+		  
+		  {/* Week Agenda Widget - Always visible, always 1180px high */}
+		  <WeekAgendaWidget 
+			accessToken={accessToken} 
+			items={agendaItems} 
+			isLoading={agendaLoading} 
+			solarData={solarForecastData}
+			onRefresh={() => accessToken && fetchCalendarEvents(accessToken)} 
+			isCollapsed={isAgendaCollapsed} 
+			onToggleCollapse={() => setIsAgendaCollapsed(!isAgendaCollapsed)} 
+		  />
+		</section>	  
+		  <aside className="xl:col-span-3 space-y-10 flex flex-col">
+			<EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={ENERGY_ENDPOINT} />
+			<MusicWidget nodeRedBaseUrl={NODERED_BASE_URL} />
+			<TimerWidget />
+			<GeminiAssistantWidget />
+		  </aside>
+		</main>
       {/* Energy Logs Overlay */}
       {showEnergyLogs && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center animate-in fade-in bg-black/80 backdrop-blur-md p-10">
