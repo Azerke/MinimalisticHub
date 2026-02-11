@@ -201,7 +201,7 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
   }, [selectedWeekType]);
 
   return (
-    <div className="bg-white rounded-[3rem] shadow-sm border border-gray-100 flex flex-col overflow-hidden h-[1180px]">
+    <div className="bg-white rounded-[3rem] shadow-sm border border-gray-100 flex flex-col overflow-hidden h-[1150px]">
       <div className="p-8 border-b border-gray-100 shrink-0">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-6">
