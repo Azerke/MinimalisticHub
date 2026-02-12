@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Music, SkipBack, Play, SkipForward, Pause, Volume2, 
-  Settings, X, Loader2, AlertTriangle, RefreshCw, Speaker
+  Settings, X, Loader2, AlertTriangle, RefreshCw, Speaker,
+  ChevronUp, ChevronDown
 } from 'lucide-react';
 
 // TypeScript interfaces
@@ -13,6 +14,7 @@ interface SonosPlayback {
   albumArt: string | null;
   position: number;
   duration: number;
+  volume: number;
   playerName: string | null;
   timestamp?: string;
 }
@@ -35,6 +37,7 @@ export const SonosWidget: React.FC<SonosWidgetProps> = ({ nodeRedBaseUrl }) => {
   const PLAY_URL = `${nodeRedBaseUrl}/sonosplay`;
   const NEXT_URL = `${nodeRedBaseUrl}/sonosnext`;
   const PREVIOUS_URL = `${nodeRedBaseUrl}/sonosprevious`;
+  const VOLUME_URL = `${nodeRedBaseUrl}/sonosvolume`;
   const AUTH_URL = `${nodeRedBaseUrl}/sonosauth`;
 
   // Fetch current playback state
@@ -106,6 +109,40 @@ export const SonosWidget: React.FC<SonosWidgetProps> = ({ nodeRedBaseUrl }) => {
       }
     } catch (err) {
       console.error("Skip previous error:", err);
+    }
+  };
+
+  const setVolume = async (newVolume: number) => {
+    // Clamp volume between 0 and 100
+    const clampedVolume = Math.max(0, Math.min(100, newVolume));
+    
+    try {
+      const response = await fetch(VOLUME_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ volume: clampedVolume })
+      });
+
+      if (response.ok) {
+        // Optimistically update local state
+        setPlayback(prev => prev ? { ...prev, volume: clampedVolume } : null);
+        // Refresh to get actual state
+        setTimeout(fetchNowPlaying, 300);
+      }
+    } catch (err) {
+      console.error("Volume change error:", err);
+    }
+  };
+
+  const volumeUp = () => {
+    if (playback) {
+      setVolume(playback.volume + 1);
+    }
+  };
+
+  const volumeDown = () => {
+    if (playback) {
+      setVolume(playback.volume - 1);
     }
   };
 
@@ -204,7 +241,7 @@ export const SonosWidget: React.FC<SonosWidgetProps> = ({ nodeRedBaseUrl }) => {
               <div className="flex justify-between items-center w-full mb-10">
                 <div className="flex items-center gap-6">
                   <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-[1.5rem] flex items-center justify-center">
-                    <Speaker size={28} />
+                    <Speaker size={32} />
                   </div>
                   <h3 className="text-2xl font-black text-gray-900 uppercase tracking-widest">
                     Sonos Authenticatie
@@ -334,76 +371,100 @@ export const SonosWidget: React.FC<SonosWidgetProps> = ({ nodeRedBaseUrl }) => {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center space-y-6">
-        {/* Album Art */}
-        <div className="relative group">
-          <div className="w-40 h-40 bg-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl transition-transform group-hover:scale-105 duration-500">
-            {playback.albumArt ? (
-              <img 
-                src={playback.albumArt} 
-                alt={playback.album || 'Album'} 
-                className="w-full h-full object-cover" 
+      <div className="flex-1 flex items-center justify-between gap-8">
+        {/* Left side: Album art and track info */}
+        <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+          {/* Album Art */}
+          <div className="relative group">
+            <div className="w-40 h-40 bg-gray-100 rounded-[2.5rem] overflow-hidden shadow-2xl transition-transform group-hover:scale-105 duration-500">
+              {playback.albumArt ? (
+                <img 
+                  src={playback.albumArt} 
+                  alt={playback.album || 'Album'} 
+                  className="w-full h-full object-cover" 
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-blue-600">
+                  <Speaker size={48} className="text-white/50" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Track Info */}
+          <div className="text-center w-full px-4">
+            <h4 className="text-xl font-black text-gray-800 tracking-tight truncate">
+              {playback.track}
+            </h4>
+            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1 truncate">
+              {playback.artist}
+            </p>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="w-full space-y-3 px-4">
+            <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-400 rounded-full transition-all duration-1000"
+                style={{ width: `${Math.min(progressPercentage, 100)}%` }}
               />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-blue-600">
-                <Speaker size={48} className="text-white/50" />
-              </div>
-            )}
+            </div>
+            <div className="flex justify-between text-[10px] font-black text-gray-300 tabular-nums">
+              <span>{formatTime(localPosition)}</span>
+              <span>{formatTime(playback.duration)}</span>
+            </div>
           </div>
-          <div className="absolute -bottom-2 -right-2 w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white shadow-lg">
-            <Volume2 size={16} />
+
+          {/* Playback Controls */}
+          <div className="flex items-center gap-10 text-gray-400">
+            <button 
+              onClick={skipPrevious}
+              className="hover:text-blue-500 transition-colors active:scale-90"
+            >
+              <SkipBack size={24} fill="currentColor" />
+            </button>
+            
+            <button 
+              onClick={togglePlayPause}
+              className="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black transition-all active:scale-90 shadow-xl"
+            >
+              {playback.isPlaying ? (
+                <Pause size={24} fill="currentColor" />
+              ) : (
+                <Play size={24} fill="currentColor" className="ml-1" />
+              )}
+            </button>
+            
+            <button 
+              onClick={skipNext}
+              className="hover:text-blue-500 transition-colors active:scale-90"
+            >
+              <SkipForward size={24} fill="currentColor" />
+            </button>
           </div>
         </div>
 
-        {/* Track Info */}
-        <div className="text-center w-full px-4">
-          <h4 className="text-xl font-black text-gray-800 tracking-tight truncate">
-            {playback.track}
-          </h4>
-          <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1 truncate">
-            {playback.artist}
-          </p>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="w-full space-y-3 px-4">
-          <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-blue-400 rounded-full transition-all duration-1000"
-              style={{ width: `${Math.min(progressPercentage, 100)}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-[10px] font-black text-gray-300 tabular-nums">
-            <span>{formatTime(localPosition)}</span>
-            <span>{formatTime(playback.duration)}</span>
-          </div>
-        </div>
-
-        {/* Playback Controls */}
-        <div className="flex items-center gap-10 text-gray-400">
-          <button 
-            onClick={skipPrevious}
-            className="hover:text-blue-500 transition-colors active:scale-90"
+        {/* Right side: Volume controls */}
+        <div className="flex flex-col items-center gap-4">
+          <button
+            onClick={volumeUp}
+            className="w-12 h-12 bg-gray-50 text-gray-400 rounded-xl hover:bg-blue-50 hover:text-blue-500 transition-all active:scale-90 flex items-center justify-center"
           >
-            <SkipBack size={24} fill="currentColor" />
+            <ChevronUp size={20} />
           </button>
           
-          <button 
-            onClick={togglePlayPause}
-            className="w-14 h-14 bg-gray-900 text-white rounded-2xl flex items-center justify-center hover:bg-black transition-all active:scale-90 shadow-xl"
-          >
-            {playback.isPlaying ? (
-              <Pause size={24} fill="currentColor" />
-            ) : (
-              <Play size={24} fill="currentColor" className="ml-1" />
-            )}
-          </button>
+          <div className="flex flex-col items-center gap-2">
+            <Volume2 size={20} className="text-blue-500" />
+            <span className="text-2xl font-black text-gray-800 tabular-nums">
+              {playback.volume}
+            </span>
+          </div>
           
-          <button 
-            onClick={skipNext}
-            className="hover:text-blue-500 transition-colors active:scale-90"
+          <button
+            onClick={volumeDown}
+            className="w-12 h-12 bg-gray-50 text-gray-400 rounded-xl hover:bg-blue-50 hover:text-blue-500 transition-all active:scale-90 flex items-center justify-center"
           >
-            <SkipForward size={24} fill="currentColor" />
+            <ChevronDown size={20} />
           </button>
         </div>
       </div>

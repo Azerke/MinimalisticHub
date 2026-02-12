@@ -16,11 +16,14 @@ import {
   Pizza, CookingPot, Utensils, Drumstick, Soup, Beef, ChefHat, Sandwich,
   Fish, Salad, Hamburger, Download, Upload
 } from 'lucide-react';
+import { MusicWidget }        from './MusicWidget.tsx';
+import { WeekAgendaWidget }   from './WeekAgendaWidget.tsx';
+import { GooglePhotosWidget } from './PhotosGoogleWidget.tsx';
+import { PollenWidget }       from './PollenWidget.tsx';
+import { WeatherOverlay }     from './WeatherOverlayWidget.tsx';
+import { GeminiAssistantWidget } from './GeminiAssistantWidget.tsx';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
-import { MusicWidget }        from './MusicWidget';
-import { WeekAgendaWidget }   from './WeekAgendaWidget';
-import { GooglePhotosWidget } from './GooglePhotosWidget';
-import { PollenWidget }       from './PollenWidget';
+
 
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
@@ -249,206 +252,6 @@ const VisualBattery = ({ soc, status, className }: { soc: number; status: string
   );
 };
 
-const GeminiAssistantWidget = () => {
-  const [isActive, setIsActive] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [needsKey, setNeedsKey] = useState(false);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const nextStartTimeRef = useRef(0);
-  const inputAudioContextRef = useRef<AudioContext | null>(null);
-  const outputAudioContextRef = useRef<AudioContext | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const sessionRef = useRef<any>(null);
-  const sessionActiveRef = useRef(false);
-  const sourcesRef = useRef(new Set<AudioBufferSourceNode>());
-
-  const addLog = (msg: string, type: 'info' | 'error' | 'success' = 'info') => {
-    const timestamp = new Date().toLocaleTimeString('nl-BE', { hour12: false });
-    setLogs(prev => [...prev, { timestamp, msg, type }].slice(-100));
-  };
-
-  const stopSession = (reason?: string) => {
-    addLog(`Sessie stoppen. Reden: ${reason || 'Geen opgegeven'}`, 'info');
-    sessionActiveRef.current = false; setIsActive(false); setIsSpeaking(false); setIsStarting(false);
-    if (reason && reason !== "Sessie gesloten.") {
-      const isAuthError = reason.includes("API key not valid") || reason.includes("Requested entity was not found") || reason.includes("403") || reason.includes("401");
-      if (isAuthError) { 
-        addLog("Authenticatie fout gedetecteerd.", 'error'); 
-        setNeedsKey(true); 
-        setErrorMsg("API Key ongeldig of niet gekoppeld. Gebruik een key van een betaald project."); 
-      }
-      else { setErrorMsg(reason); }
-    }
-    sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} }); sourcesRef.current.clear();
-    if (scriptProcessorRef.current) { try { scriptProcessorRef.current.disconnect(); scriptProcessorRef.current.onaudioprocess = null; } catch (e) {} scriptProcessorRef.current = null; }
-    if (sessionRef.current) { try { sessionRef.current.close(); } catch(e) {} sessionRef.current = null; }
-    if (inputAudioContextRef.current) { try { inputAudioContextRef.current.close(); } catch(e) {} inputAudioContextRef.current = null; }
-    if (outputAudioContextRef.current) { try { outputAudioContextRef.current.close(); } catch(e) {} outputAudioContextRef.current = null; }
-  };
-
-  const handleKeySetup = async () => {
-    if ((window as any).aistudio) {
-      addLog("Google AI Studio Key Selector openen...", 'info');
-      await (window as any).aistudio.openSelectKey(); 
-      setErrorMsg(null); 
-      setNeedsKey(false);
-      setShowSettings(false);
-      addLog("Key geselecteerd. Startpoging in 500ms...", 'info');
-      setTimeout(startSession, 500);
-    }
-  };
-
-  const startSession = async () => {
-    if (isActive || isStarting) return;
-    setIsStarting(true); setErrorMsg(null); setNeedsKey(false);
-    if ((window as any).aistudio) {
-      const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-      if (!hasKey && !process.env.API_KEY) { 
-        setNeedsKey(true); 
-        setErrorMsg("Koppel een betaalde API Key om te starten."); 
-        setIsStarting(false); 
-        return; 
-      }
-    }
-    try {
-      addLog("Live sessie initialiseren...", 'info');
-      const inCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      const outCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      if (inCtx.state === 'suspended') await inCtx.resume();
-      const outGain = outCtx.createGain(); outGain.connect(outCtx.destination);
-      inputAudioContextRef.current = inCtx; outputAudioContextRef.current = outCtx;
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        callbacks: {
-          onopen: () => {
-            addLog("Live sessie verbonden met Google AI Cloud.", 'success');
-            sessionActiveRef.current = true; setIsActive(true); setIsStarting(false);
-            const source = inCtx.createMediaStreamSource(stream);
-            const scriptProcessor = inCtx.createScriptProcessor(4096, 1, 1);
-            scriptProcessorRef.current = scriptProcessor;
-            scriptProcessor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const pcmBytes = createPCMUnit8Array(inputData);
-              sessionPromise.then((session) => { 
-                if (sessionActiveRef.current) {
-                  session.sendRealtimeInput({ media: { data: encode(pcmBytes), mimeType: 'audio/pcm;rate=16000' } }); 
-                }
-              });
-            };
-            source.connect(scriptProcessor); scriptProcessor.connect(inCtx.destination);
-          },
-          onmessage: async (message: LiveServerMessage) => {
-            if (message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data) {
-              const audioData = message.serverContent.modelTurn.parts[0].inlineData.data;
-              if (outputAudioContextRef.current) {
-                setIsSpeaking(true); nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputAudioContextRef.current.currentTime);
-                const buffer = await decodeAudioData(decode(audioData), outputAudioContextRef.current, 24000, 1);
-                const source = outputAudioContextRef.current.createBufferSource();
-                source.buffer = buffer; source.connect(outGain);
-                source.addEventListener('ended', () => { sourcesRef.current.delete(source); if (sourcesRef.current.size === 0) setIsSpeaking(false); });
-                source.start(nextStartTimeRef.current); nextStartTimeRef.current += buffer.duration; sourcesRef.current.add(source);
-              }
-            }
-          },
-          onclose: (e) => stopSession(e.reason || "Sessie gesloten."),
-          onerror: (e: any) => stopSession(e?.message || "Socket fout")
-        },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } },
-          systemInstruction: "Je bent Gemini Hub, een behulpzame assistent in Herenthout. Houd antwoorden kort en spreek Nederlands."
-        }
-      });
-      sessionRef.current = await sessionPromise;
-    } catch (err: any) { stopSession(err.message || "Kon Live sessie niet starten."); }
-  };
-
-  return (
-    <>
-      <div className={`p-8 rounded-[2.5rem] shadow-sm border transition-all duration-500 overflow-hidden relative h-[200px] flex flex-col ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100'}`}>
-        <div className="flex justify-between items-center mb-6 shrink-0">
-          <div className="flex items-center gap-4">
-            <button onClick={() => setShowLogs(true)} className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em] flex items-center gap-2 hover:text-indigo-400 transition-colors">
-              <span className={`w-2 h-2 rounded-full ${(isActive || isStarting) ? 'bg-indigo-500 animate-pulse' : 'bg-gray-300'}`} /> Gemini Hub Live
-            </button>
-            <button onClick={() => setShowSettings(true)} className="w-8 h-8 flex items-center justify-center bg-gray-50 text-gray-400 rounded-xl hover:text-indigo-500 transition-colors">
-              <Settings size={14} />
-            </button>
-          </div>
-          <button onClick={isActive ? () => stopSession() : startSession} disabled={isStarting} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all active:scale-90 ${(isActive || isStarting) ? 'bg-indigo-500 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>
-            {isStarting ? <Loader2 size={20} className="animate-spin" /> : isActive ? <MicOff size={20} /> : <Mic size={20} />}
-          </button>
-        </div>
-        <div className="flex-1 flex flex-col justify-center space-y-4">
-          {errorMsg ? (
-            <div className="py-2 text-center"><div className="flex flex-col items-center gap-3 text-rose-500 mb-6"><AlertTriangle size={32} /><p className="text-sm font-bold leading-tight max-w-xs">{errorMsg}</p></div>{needsKey && (<button onClick={() => setShowSettings(true)} className="w-full py-4 bg-rose-50 text-rose-600 rounded-2xl text-[11px] font-black uppercase tracking-widest border border-rose-100 hover:bg-rose-100 transition-colors shadow-sm">Instellingen openen</button>)}</div>
-          ) : isActive ? (
-            <div className="py-4 flex flex-col items-center"><div className="flex items-end gap-2 h-16 mb-8">{[1, 2, 3, 4, 5, 6, 7].map(i => (<div key={i} className={`w-1.5 bg-indigo-400 rounded-full transition-all duration-300 ${isSpeaking ? 'h-full animate-pulse' : 'h-3'}`} style={{animationDelay: `${i * 0.1}s`}} />))}</div><span className="text-sm font-black text-indigo-600 uppercase tracking-[0.3em]">{isSpeaking ? 'Hub spreekt...' : 'Hub luistert...'}</span></div>
-          ) : isStarting ? ( <div className="flex flex-col items-center gap-4"><Loader2 size={40} className="text-indigo-400 animate-spin" /><p className="text-sm font-black text-indigo-400 uppercase tracking-widest animate-pulse">Initialiseren...</p></div> ) : (<div className="text-center space-y-6"><div className="w-20 h-20 bg-gray-50 rounded-[2rem] flex items-center justify-center mx-auto text-gray-300"><Sparkles size={32} /></div><p className="text-sm font-bold text-gray-400 max-w-[200px] mx-auto leading-relaxed">Activeer de assistent for een live gesprek.</p></div>)}
-        </div>
-      </div>
-
-      {showLogs && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center animate-in fade-in bg-black/80 backdrop-blur-md p-10">
-          <div className="bg-[#1a1a1a] w-full max-w-4xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
-            <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center"><div className="flex items-center gap-4 text-indigo-400"><Terminal size={24} /><h3 className="font-black text-xs uppercase tracking-[0.4em]">Gemini Hub Live Console Logs</h3></div><div className="flex items-center gap-4"><button onClick={() => { const text = logs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"><Copy size={18} /></button><button onClick={() => setLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all"><Trash2 size={18} /></button><button onClick={() => setShowLogs(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all"><X size={24} /></button></div></div>
-            <div className="flex-1 overflow-y-auto p-8 space-y-2 font-mono text-[11px] scroll-smooth no-scrollbar">
-              {logs.length === 0 ? ( <div className="h-full flex items-center justify-center opacity-20 text-white font-black uppercase tracking-widest">Geen logs beschikbaar</div> ) : logs.map((log, i) => ( <div key={i} className={`flex gap-4 border-b border-white/5 sleeper-b pb-2 last:border-0 ${log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-gray-400'}`}><span className="opacity-40 whitespace-nowrap">[{log.timestamp}]</span><span className="font-bold whitespace-nowrap">[{log.type.toUpperCase()}]</span><span className="text-white opacity-80 break-all">{log.msg}</span></div> ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showSettings && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center animate-in fade-in duration-300 bg-white/95 backdrop-blur-3xl p-10">
-          <div className="bg-white w-full max-w-2xl p-16 rounded-[4rem] shadow-2xl border border-gray-100 flex flex-col items-center text-center">
-            <div className="w-24 h-24 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center mb-10">
-              <Key size={40} />
-            </div>
-            <h3 className="text-2xl font-black text-gray-900 uppercase tracking-widest mb-6">API Key Beheer</h3>
-            <p className="text-sm text-gray-500 leading-relaxed mb-10 max-w-sm">
-              Om de <strong>Live Voice</strong> assistent te gebruiken heb je een API-sleutel nodig van een Google Cloud-project met een gekoppelde betaalmethode.
-            </p>
-            
-            <div className="w-full p-8 bg-gray-50 rounded-[2.5rem] border border-gray-100 text-left mb-12">
-              <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2"><Info size={12} /> Belangrijke Informatie</h4>
-              <ul className="space-y-4">
-                <li className="flex gap-4 items-start">
-                  <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                  <p className="text-xs text-gray-600 font-medium leading-normal">
-                    Schakel facturering in via de <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-indigo-600 font-bold hover:underline">Google AI Studio Billing Docs</a>.
-                  </p>
-                </li>
-                <li className="flex gap-4 items-start">
-                  <div className="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                  <p className="text-xs text-gray-600 font-medium leading-normal">
-                    Gebruik een sleutel uit een project binnen je <strong>betaalde organisatie</strong>. Gratis keys werken niet voor Live Voice.
-                  </p>
-                </li>
-              </ul>
-            </div>
-
-            <div className="flex flex-col gap-4 w-full">
-              <button onClick={handleKeySetup} className="w-full py-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-[2rem] font-black text-lg uppercase tracking-[0.2em] shadow-xl shadow-indigo-100 transition-all active:scale-95 flex items-center justify-center gap-4">
-                <Plus size={20} /> Sleutel Selecteren / Updaten
-              </button>
-              <button onClick={() => setShowSettings(false)} className="w-full py-6 text-gray-400 hover:text-gray-900 text-xs font-black uppercase tracking-widest transition-colors">
-                Annuleren
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
 const TimerWidget = () => {
   const [timeLeft, setTimeLeft] = useState(0); const [isRunning, setIsRunning] = useState(false);
   const [status, setStatus] = useState<'idle' | 'running' | 'finished'>('idle');
@@ -582,78 +385,11 @@ const WeatherIcon = ({ type, className }: { type: string, className?: string }) 
 
 const WeatherWidget = ({ data, onClick, isRefreshing }: { data: WeatherData | null, onClick: () => void, isRefreshing: boolean }) => (
   <button onClick={onClick} className="flex items-center gap-6 px-8 py-5 bg-white border border-gray-100 rounded-2xl shadow-sm hover:border-blue-400 hover:shadow-xl transition-all group active:scale-95 text-left">
-    <div className="flex flex-col items-end"><span className="text-xl font-black text-gray-900 leading-none">{data ? data.currentTemp + '°C' : '--°C'}</span>{data && (<div className="flex items-center gap-1.5 mt-1.5"><Wind size={10} className="text-blue-300" /><span className="text-[9px] text-gray-400 uppercase tracking-widest font-black">{data.windSpeed}</span></div>)}<span className="text-[8px] text-gray-300 uppercase tracking-[0.2em] font-black mt-1">Herenthout</span></div>
+    <div className="flex flex-col items-end"><span className="text-3xl font-black text-gray-900 leading-none">{data ? data.currentTemp + '°C' : '--°C'}</span>{data && (<div className="flex items-center gap-1 mt-1"><Wind size={16} className="text-blue-300" /><span className="text-[12px] text-gray-400 uppercase tracking-widest font-black">{data.windSpeed}</span></div>)}</div>
     <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center group-hover:bg-blue-100 transition-colors">{isRefreshing ? (<RefreshCw className="w-6 h-6 text-blue-300 animate-spin" />) : (<WeatherIcon type={data?.hourly[0]?.icon || 'cloud'} className="w-7 h-7 text-blue-400 group-hover:scale-110 transition-transform" />)}</div>
   </button>
 );
 
-const WeatherOverlay = ({ onClose, weatherData, loading }: any) => {
-  return (
-    <div className="absolute inset-0 z-[250] flex items-center justify-center animate-in fade-in duration-300">
-      <div className="absolute inset-0 bg-white/60 backdrop-blur-[100px]" onClick={onClose} />
-      <div className="relative w-full h-full bg-white/40 shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="p-10 flex justify-between items-center bg-white/20 backdrop-blur-xl shrink-0 border-b border-white/40">
-          <div className="flex items-center gap-8">
-            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg border border-gray-100">
-              <Cloud size={32} className="text-blue-500" />
-            </div>
-            <div>
-              <h3 className="text-4xl font-black text-gray-900 tracking-tight">Weersverwachting</h3>
-              <div className="flex items-center gap-3 mt-1"><span className="text-xs text-gray-400 font-black uppercase tracking-[0.3em]">Herenthout, BE</span></div>
-            </div>
-          </div>
-          <button onClick={onClose} className="w-20 h-20 flex items-center justify-center bg-gray-900 hover:bg-black rounded-[2.5rem] transition-all text-white shadow-2xl group active:scale-90">
-            <X className="w-10 h-10 group-hover:rotate-90 transition-transform" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-12 space-y-24 no-scrollbar scroll-smooth pb-32">
-          {loading && !weatherData ? ( 
-            <div className="flex flex-col items-center justify-center py-48 gap-8">
-              <Loader2 className="w-24 h-24 text-blue-400 animate-spin" />
-            </div> 
-          ) : weatherData && ( 
-            <div className="space-y-24 animate-in slide-in-from-bottom-8">
-              <section className="space-y-12">
-                <div className="flex items-center gap-4 px-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full" />
-                  <span className="text-lg text-gray-900 font-black uppercase tracking-[0.4em]">Komende uren</span>
-                </div>
-                <div className="flex gap-6 overflow-x-auto pb-8 no-scrollbar snap-x px-2">
-                  {weatherData.hourly.map((h: any, i: number) => ( 
-                    <div key={i} className="flex-shrink-0 w-44 bg-white/80 border border-white/50 p-12 rounded-[3rem] flex flex-col items-center gap-8 hover:bg-white hover:shadow-2xl transition-all snap-start group">
-                      <span className="text-[14px] text-gray-400 font-black uppercase tracking-widest">{h.time}</span>
-                      <WeatherIcon type={h.icon} className="w-16 h-16 text-blue-400 group-hover:scale-110 transition-transform" />
-                      <span className="text-4xl font-light text-gray-900 tracking-tighter">{h.temp + '°'}</span>
-                    </div> 
-                  ))}
-                </div>
-              </section>
-              <section className="space-y-12">
-                <div className="flex items-center gap-4 px-2">
-                  <div className="w-2 h-2 bg-gray-300 rounded-full" />
-                  <span className="text-lg text-gray-900 font-black uppercase tracking-[0.4em]">7-Daagse</span>
-                </div>
-                <div className="flex gap-6 overflow-x-auto pb-8 no-scrollbar snap-x px-2">
-                  {weatherData.daily.map((d: any, i: number) => ( 
-                    <div key={i} className="flex-shrink-0 w-52 bg-white/80 border border-white/50 p-10 rounded-[3.5rem] flex flex-col items-center gap-6 hover:bg-white hover:shadow-2xl transition-all snap-start group">
-                      <span className="text-[14px] text-gray-400 font-black uppercase tracking-widest">{d.day}</span>
-                      <WeatherIcon type={d.icon} className="w-16 h-16 text-blue-400 group-hover:scale-110 transition-transform" />
-                      <div className="text-center">
-                        <div className="text-4xl font-black text-gray-900">{d.high + '°'}</div>
-                        <div className="text-xl font-bold text-gray-300 mt-1">{d.low + '°'}</div>
-                      </div>
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">{d.condition}</span>
-                    </div> 
-                  ))}
-                </div>
-              </section>
-            </div> 
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 
 
@@ -905,7 +641,7 @@ const App: React.FC = () => {
           let finalDescription = displayDescription;
           let textColor = undefined;
 
-          // Pas alleen aan als er precies één naamtype gevonden is
+          // Pas alleen aan als er precies Ã©Ã©n naamtype gevonden is
           if (foundNamesInTitle.length === 1) {
             const rule = foundNamesInTitle[0];
             textColor = rule.color;
