@@ -104,9 +104,13 @@ export const GooglePhotosWidget: React.FC<GooglePhotosWidgetProps> = ({ accessTo
   }, []);
 
   const extractUri = (item: any) => {
-    let uri = item.mediaFile?.servingUrl || 
+    let uri = item.mediaFile?.baseUrl ||
+           item.mediaFile?.servingUrl || 
+           item.preview?.baseUrl ||
            item.preview?.servingUrl || 
+           item.mediaItem?.mediaFile?.baseUrl ||
            item.mediaItem?.mediaFile?.servingUrl || 
+           item.mediaItem?.preview?.baseUrl ||
            item.mediaItem?.preview?.servingUrl ||
            item.servingUrl ||
            item.baseUrl;
@@ -242,6 +246,7 @@ export const GooglePhotosWidget: React.FC<GooglePhotosWidgetProps> = ({ accessTo
       const data = await response.json();
       if (data.mediaItems && data.mediaItems.length > 0) {
         addLog(`${data.mediaItems.length} media items gevonden. Downloaden...`, 'info');
+        addLog(`[DEBUG] Eerste item structuur: ${JSON.stringify(Object.keys(data.mediaItems[0]))} | mediaFile keys: ${JSON.stringify(Object.keys(data.mediaItems[0].mediaFile || {}))}`, 'info');
 
         const processedItems = await Promise.all(data.mediaItems.map(async (item: any) => {
           try {

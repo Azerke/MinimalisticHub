@@ -823,7 +823,7 @@ const App: React.FC = () => {
 			<EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={ENERGY_ENDPOINT} />
 			<MusicWidget nodeRedBaseUrl={NODERED_BASE_URL} />
 			<TimerWidget />
-			<GeminiAssistantWidget />
+			<GeminiAssistantWidget accessToken={accessToken} />
 		  </aside>
 		</main>
       {/* Energy Logs Overlay */}
