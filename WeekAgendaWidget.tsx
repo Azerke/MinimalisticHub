@@ -115,7 +115,8 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
   const getSolarForecastForDay = (date: Date) => {
     if (!solarData?.solar) return null;
     const dStr = date.getDate().toString().padStart(2, '0') + '/' + (date.getMonth() + 1).toString().padStart(2, '0') + '/' + date.getFullYear();
-    return Object.values(solarData.solar).find(item => item.date === dStr && item.description.includes('estimated'));
+    const values = Object.values(solarData.solar) as SolarForecastItem[];
+    return values.find(item => item.date === dStr && item.description.includes('estimated'));
   };
 
   const toggleTimezone = () => {

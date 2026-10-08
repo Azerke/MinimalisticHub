@@ -11,7 +11,7 @@ export const PollenWidget: React.FC<PollenWidgetProps> = ({ onClose }) => {
   const [error, setError] = useState<string | null>(null);
 
   // Use Node-RED proxy to avoid CORS issues
-  const NODERED_POLLEN_ENDPOINT = 'https://100.74.104.126:1881/pollen';
+  const NODERED_POLLEN_ENDPOINT = 'https://einstein-victron.taile3356b.ts.net:1881/pollen';
   const KMI_POLLEN_URL = 'https://www.meteo.be/nl/weer/verwachtingen/stuifmeelallergie-en-hooikoorts';
 
   const fetchPollenData = async () => {

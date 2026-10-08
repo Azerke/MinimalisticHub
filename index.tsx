@@ -28,10 +28,10 @@ import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
 const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
-const ENERGY_ENDPOINT = 'https://100.74.104.126:1881/evdata';
-const SOLAR_FORECAST_ENDPOINT = 'https://100.74.104.126:1881/solardata';
-const NODERED_BASE_URL = 'https://100.74.104.126:1881';
-const NODERED_DASHBOARD = 'https://100.74.104.126:1881/dashboard/';
+const ENERGY_ENDPOINT = 'https://einstein-victron.taile3356b.ts.net:1881/evdata';
+const SOLAR_FORECAST_ENDPOINT = 'https://einstein-victron.taile3356b.ts.net:1881/solardata';
+const NODERED_BASE_URL = 'https://einstein-victron.taile3356b.ts.net:1881';
+const NODERED_DASHBOARD = 'https://einstein-victron.taile3356b.ts.net:1881/dashboard/';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
 
 const WEATHER_CACHE_KEY = 'hub_weather_cache';
@@ -188,6 +188,11 @@ interface EnergyData {
   meta: {
     timestamp: string;
     system: string;
+  };
+  dayTotals: {
+    boiler: number;
+    grid: number;
+    consumption: number;
   };
 }
 
@@ -500,6 +505,38 @@ const WeatherWidget = ({ data, onClick, isRefreshing }: { data: WeatherData | nu
             </div>
           </div>
         </div>
+
+        <div className="grid grid-cols-3 gap-4 border-t border-gray-50 pt-8">
+          <div className="flex flex-col gap-2">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Boiler</span>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-black text-gray-900 tabular-nums">
+                {data ? (data.dayTotals.boiler / 1000).toFixed(2) : '--'}
+              </span>
+              <span className="text-[10px] font-bold text-gray-300">kWh</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 items-center text-center">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Grid</span>
+            <div className="flex items-center justify-center gap-2">
+              <span className="text-2xl font-black tabular-nums text-gray-900">
+                {data ? (data.dayTotals.grid / 1000).toFixed(2) : '--'}
+              </span>
+              <span className="text-[10px] font-bold text-gray-300">kWh</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 text-right items-end">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Verbruik</span>
+            <div className="flex items-center justify-end gap-2">
+              <span className="text-2xl font-black tabular-nums text-gray-900">
+                {data ? (data.dayTotals.consumption / 1000).toFixed(2) : '--'}
+              </span>
+              <span className="text-[10px] font-bold text-gray-300">kWh</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -731,6 +768,11 @@ const App: React.FC = () => {
           meta: {
             timestamp: energyRaw.meta.timestamp,
             system: energyRaw.meta.system
+          },
+          dayTotals: {
+            boiler: energyRaw.grid.boilerpowerday?.value || 0,
+            grid: energyRaw.grid.gridpowerday?.value || 0,
+            consumption: energyRaw.grid.acpowerday?.value || 0
           }
         }); 
 

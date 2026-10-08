@@ -18,7 +18,7 @@ interface SpotifyPlayback {
 }
 
 interface SpotifyWidgetProps {
-  nodeRedBaseUrl: string; // e.g., "https://100.74.104.126:1881"
+  nodeRedBaseUrl: string; // e.g., "https://einstein-victron.taile3356b.ts.net:1881"
 }
 
 export const SpotifyWidget: React.FC<SpotifyWidgetProps> = ({ nodeRedBaseUrl }) => {
