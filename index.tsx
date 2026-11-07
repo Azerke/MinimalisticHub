@@ -16,7 +16,7 @@ import {
   Pizza, CookingPot, Utensils, Drumstick, Soup, Beef, ChefHat, Sandwich,
   Fish, Salad, Hamburger, Download, Upload
 } from 'lucide-react';
-import { MusicWidget }        from './MusicWidget.tsx';
+import { EnergyDevicesWidget } from './EnergyDevicesWidget.tsx';
 import { WeekAgendaWidget }   from './WeekAgendaWidget.tsx';
 import { GooglePhotosWidget } from './PhotosGoogleWidget.tsx';
 import { PollenWidget }       from './PollenWidget.tsx';
@@ -28,10 +28,9 @@ import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 // --- Constants & Types ---
 const CLIENT_ID = '83368315587-g04nagjcgrsaotbdpet6gq2f7njrh2tu.apps.googleusercontent.com';
 const SCOPES = 'openid profile email https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/photospicker.mediaitems.readonly';
-const ENERGY_ENDPOINT = 'https://einstein-victron.taile3356b.ts.net:1881/evdata';
-const SOLAR_FORECAST_ENDPOINT = 'https://einstein-victron.taile3356b.ts.net:1881/solardata';
-const NODERED_BASE_URL = 'https://einstein-victron.taile3356b.ts.net:1881';
-const NODERED_DASHBOARD = 'https://einstein-victron.taile3356b.ts.net:1881/dashboard/';
+const TAILSCALE_HOST = 'https://einstein-victron.taile3356b.ts.net:1881';
+const DIRECT_IP_HOST = 'https://100.74.104.126:1881';
+const HOST_STORAGE_KEY = 'hub_nodered_host_mode';
 const VICTRON_VRM_URL = 'https://vrm.victronenergy.com/installation/756249/dashboard';
 
 const WEATHER_CACHE_KEY = 'hub_weather_cache';
@@ -354,7 +353,7 @@ const TimerWidget = () => {
   );
 };
 
-const EnergyOverlay = ({ onClose }: { onClose: () => void }) => {
+const EnergyOverlay = ({ onClose, dashboardUrl }: { onClose: () => void; dashboardUrl: string }) => {
   return (
     <div className="fixed inset-0 z-[500] flex flex-col bg-white animate-in fade-in duration-300">
       <div className="p-6 flex justify-between items-center bg-white border-b border-gray-200 shrink-0">
@@ -373,7 +372,7 @@ const EnergyOverlay = ({ onClose }: { onClose: () => void }) => {
       </div>
       <div className="flex-1 w-full bg-[#f0f0f0] overflow-hidden relative">
         <iframe 
-          src={NODERED_DASHBOARD} 
+          src={dashboardUrl} 
           className="w-full h-full border-none" 
           title="Node-RED Dashboard"
         />
@@ -564,6 +563,22 @@ const App: React.FC = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const tokenClientRef = useRef<any>(null);
   const [showPollen, setShowPollen] = useState(false);
+  const [hostMode, setHostMode] = useState<'tailscale' | 'direct'>(() => {
+    const saved = localStorage.getItem(HOST_STORAGE_KEY);
+    return saved === 'direct' ? 'direct' : 'tailscale';
+  });
+
+  const nodeRedBaseUrl = hostMode === 'direct' ? DIRECT_IP_HOST : TAILSCALE_HOST;
+  const energyEndpoint = `${nodeRedBaseUrl}/evdata`;
+  const solarForecastEndpoint = `${nodeRedBaseUrl}/solardata`;
+  const nodeRedDashboard = `${nodeRedBaseUrl}/dashboard/`;
+
+  const toggleHostMode = () => {
+    const nextMode = hostMode === 'tailscale' ? 'direct' : 'tailscale';
+    setHostMode(nextMode);
+    localStorage.setItem(HOST_STORAGE_KEY, nextMode);
+    addEnergyLog(`API Host gewijzigd naar: ${nextMode === 'direct' ? DIRECT_IP_HOST : TAILSCALE_HOST}`, 'info');
+  };
 
   const handleLogout = () => { 
     localStorage.removeItem('hub_access_token'); 
@@ -573,7 +588,6 @@ const App: React.FC = () => {
     setGrantedScopes("");
     setUser(null); 
     setAgendaItems([]); 
-    setSpotifyConfig(null);
   };
   
   const handleLogin = (isReAuth = false) => { 
@@ -618,11 +632,9 @@ const App: React.FC = () => {
       } else { setTimeout(initGsi, 500); }
     };
     initGsi(); 
-    const energyTimer = startEnergySync(); 
     if (!weatherData) fetchWeatherForecast(false);
     return () => { 
       clearInterval(clockTimer); 
-      clearInterval(energyTimer);
       document.removeEventListener('fullscreenchange', fullscreenHandler); 
     };
   }, []);
@@ -720,18 +732,21 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); } finally { setWeatherLoading(false); } 
   }
   
-  const startEnergySync = () => { 
-    return setInterval(async () => { 
-      try { 
-        // Concurrent fetches for performance
+  useEffect(() => {
+    let isCancelled = false;
+
+    const syncEnergyData = async () => {
+      try {
         const [energyResp, solarForecastResp] = await Promise.all([
-          fetch(ENERGY_ENDPOINT),
-          fetch(SOLAR_FORECAST_ENDPOINT)
+          fetch(energyEndpoint),
+          fetch(solarForecastEndpoint)
         ]);
 
         if (!energyResp.ok) throw new Error(`Energy Status: ${energyResp.status}`);
         const energyRaw = await energyResp.json(); 
         
+        if (isCancelled) return;
+
         setEnergyData({ 
           ev: {
             power: energyRaw.ev.current_power.value,
@@ -778,17 +793,29 @@ const App: React.FC = () => {
 
         if (solarForecastResp.ok) {
           const solarRaw = await solarForecastResp.json();
-          setSolarForecastData(solarRaw);
+          if (!isCancelled) {
+            setSolarForecastData(solarRaw);
+          }
         }
 
         setEnergyError(null); 
-        addEnergyLog("Data succesvol opgehaald", "success");
+        addEnergyLog("Data succesvol opgehaald (" + (hostMode === 'direct' ? '100.74.104.126' : 'einstein-victron') + ")", "success");
       } catch (e: any) { 
-        setEnergyError("Verbindingsfout"); 
-        addEnergyLog("Fetch fout: " + e.message, "error");
+        if (!isCancelled) {
+          setEnergyError("Verbindingsfout"); 
+          addEnergyLog("Fetch fout (" + (hostMode === 'direct' ? '100.74.104.126' : 'einstein-victron') + "): " + e.message, "error");
+        }
       } 
-    }, 2000); 
-  };
+    };
+
+    syncEnergyData();
+    const interval = setInterval(syncEnergyData, 2000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [energyEndpoint, solarForecastEndpoint, hostMode]);
 
   return (
     <div className="min-h-screen w-full bg-[#fcfcfc] flex flex-col animate-in fade-in">
@@ -832,6 +859,27 @@ const App: React.FC = () => {
 			>
 			  <Flower2 size={24} />
 			</button>
+            {/* API Host Switcher Toggle */}
+            <button 
+              onClick={toggleHostMode}
+              className="h-16 px-5 bg-white border border-gray-100 hover:border-gray-300 rounded-[2rem] shadow-xl flex items-center gap-3 transition-all active:scale-95 text-left group"
+              title={`Wissel API host tussen Tailscale DNS (${TAILSCALE_HOST}) en Direct IP (${DIRECT_IP_HOST})\nActueel: ${nodeRedBaseUrl}`}
+            >
+              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors ${
+                hostMode === 'direct' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
+              }`}>
+                <Globe size={20} />
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Host</span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${hostMode === 'direct' ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'}`} />
+                </div>
+                <span className="text-xs font-black text-gray-800 font-mono tracking-tight">
+                  {hostMode === 'direct' ? '100.74.104.126' : 'ts.net (DNS)'}
+                </span>
+              </div>
+            </button>
 		  </div>
         </div>
       </header>
@@ -839,7 +887,7 @@ const App: React.FC = () => {
 		<section className="xl:col-span-7 flex flex-col gap-10">
 		  {/* Pollen Widget - Shows above everything when toggled on */}
 		  {showPollen && (
-			<PollenWidget onClose={() => setShowPollen(false)} />
+			<PollenWidget onClose={() => setShowPollen(false)} nodeRedBaseUrl={nodeRedBaseUrl} />
 		  )}
 		  
 		  {/* Google Photos Widget - Shows above agenda when toggled on */}
@@ -862,8 +910,8 @@ const App: React.FC = () => {
 		  />
 		</section>	  
 		  <aside className="xl:col-span-3 space-y-10 flex flex-col">
-			<EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={ENERGY_ENDPOINT} />
-			<MusicWidget nodeRedBaseUrl={NODERED_BASE_URL} />
+			<EnergyWidget data={energyData} error={energyError} onTitleClick={() => setShowEnergyLogs(true)} onWidgetClick={() => setIsEnergyOpen(true)} apiUrl={energyEndpoint} />
+			<EnergyDevicesWidget endpoint={energyEndpoint} />
 			<TimerWidget />
 			<GeminiAssistantWidget accessToken={accessToken} />
 		  </aside>
@@ -874,8 +922,8 @@ const App: React.FC = () => {
           <div className="bg-[#1a1a1a] w-full max-w-4xl h-[80vh] rounded-[3rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl">
             <div className="p-8 bg-[#222] border-b border-white/5 flex justify-between items-center"><div className="flex items-center gap-4 text-emerald-400"><Zap size={24} /><h3 className="font-black text-xs uppercase tracking-[0.4em]">Energy System Logs</h3></div><div className="flex items-center gap-4"><button onClick={() => { const text = energyLogs.map(l => `[${l.timestamp}] [${l.type.toUpperCase()}] ${l.msg}`).join('\n'); navigator.clipboard.writeText(text); }} className="p-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"><Copy size={18} /></button><button onClick={() => setEnergyLogs([])} className="p-3 bg-white/5 hover:bg-white/10 text-rose-400 rounded-xl transition-all"><Trash2 size={18} /></button><button onClick={() => setShowEnergyLogs(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 text-white rounded-2xl transition-all"><X size={24} /></button></div></div>
             <div className="p-4 bg-emerald-500/5 border-b border-white/5 flex items-center justify-between px-8">
-               <span className="text-[10px] font-bold text-emerald-500/60 uppercase tracking-widest">End-point: {ENERGY_ENDPOINT}</span>
-               <a href={ENERGY_ENDPOINT} target="_blank" rel="noreferrer" className="text-[10px] font-black text-emerald-400 uppercase tracking-widest hover:underline flex items-center gap-2">Test URL <ExternalLink size={10} /></a>
+               <span className="text-[10px] font-bold text-emerald-500/60 uppercase tracking-widest">End-point: {energyEndpoint}</span>
+               <a href={energyEndpoint} target="_blank" rel="noreferrer" className="text-[10px] font-black text-emerald-400 uppercase tracking-widest hover:underline flex items-center gap-2">Test URL <ExternalLink size={10} /></a>
             </div>
             <div className="flex-1 overflow-y-auto p-8 space-y-2 font-mono text-[11px] scroll-smooth no-scrollbar">
               {energyLogs.length === 0 ? ( 
@@ -896,7 +944,7 @@ const App: React.FC = () => {
       )}
 
       {isWeatherOpen && <WeatherOverlay onClose={() => setIsWeatherOpen(false)} weatherData={weatherData} loading={weatherLoading} />}
-      {isEnergyOpen && <EnergyOverlay onClose={() => setIsEnergyOpen(false)} />}
+      {isEnergyOpen && <EnergyOverlay onClose={() => setIsEnergyOpen(false)} dashboardUrl={nodeRedDashboard} />}
     </div>
   );
 };

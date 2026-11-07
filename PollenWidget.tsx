@@ -3,15 +3,17 @@ import { Loader2, Flower2, X, AlertCircle, ExternalLink, RefreshCw } from 'lucid
 
 interface PollenWidgetProps {
   onClose?: () => void;
+  nodeRedBaseUrl?: string;
 }
 
-export const PollenWidget: React.FC<PollenWidgetProps> = ({ onClose }) => {
+export const PollenWidget: React.FC<PollenWidgetProps> = ({ onClose, nodeRedBaseUrl }) => {
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Use Node-RED proxy to avoid CORS issues
-  const NODERED_POLLEN_ENDPOINT = 'https://einstein-victron.taile3356b.ts.net:1881/pollen';
+  const baseUrl = nodeRedBaseUrl || 'https://einstein-victron.taile3356b.ts.net:1881';
+  const nodeRedPollenEndpoint = `${baseUrl}/pollen`;
   const KMI_POLLEN_URL = 'https://www.meteo.be/nl/weer/verwachtingen/stuifmeelallergie-en-hooikoorts';
 
   const fetchPollenData = async () => {
@@ -20,7 +22,7 @@ export const PollenWidget: React.FC<PollenWidgetProps> = ({ onClose }) => {
     
     try {
       // Fetch via Node-RED proxy
-      const response = await fetch(NODERED_POLLEN_ENDPOINT);
+      const response = await fetch(nodeRedPollenEndpoint);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -42,7 +44,7 @@ export const PollenWidget: React.FC<PollenWidgetProps> = ({ onClose }) => {
 
   useEffect(() => {
     fetchPollenData();
-  }, []);
+  }, [nodeRedBaseUrl]);
 
   return (
     <div className="bg-white rounded-[3rem] shadow-sm border border-gray-100 flex flex-col h-[1200px] overflow-hidden relative">
