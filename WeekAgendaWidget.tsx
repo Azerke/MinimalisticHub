@@ -317,14 +317,14 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
                         >
                           <div className={`flex flex-col ${!item.isAllDay ? 'text-black' : 'text-white'}`}>
                             {!item.isAllDay && (
-                              <span className="text-[23px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
+                              <span className="text-[21px] font-black opacity-40 leading-none tabular-nums uppercase pl-1">
                                 {item.start.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                                 {' - '}
                                 {item.end.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone })}
                               </span>
                             )}
                             <span 
-                              className="text-[30px] font-bold leading-tight line-clamp-3 pl-1 pr-1"
+                              className="text-[28px] font-bold leading-tight line-clamp-3 pl-1 pr-1"
                               style={item.textColor ? { color: item.textColor } : {}}
                             >
                               {item.title}
@@ -348,7 +348,7 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
                               >
                                 {getFoodIcon(f.title)}
                               </button>
-                              <span className="text-[26px] font-black text-gray-800 tracking-tight leading-none">
+                              <span className="text-[24px] font-black text-gray-800 tracking-tight leading-none">
                                 {displayFood}
                               </span>
                             </div>

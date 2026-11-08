@@ -820,26 +820,28 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen w-full bg-[#fcfcfc] flex flex-col animate-in fade-in">
       <header className="w-full px-[50px] pt-6 pb-2 flex flex-col md:flex-row md:items-center justify-between shrink-0 relative">
-        {/* Left Section: Greeting + Date */}
-        <div className="flex flex-col gap-1.5 z-10 md:w-1/3">
-          <h1 className="text-4xl sm:text-6xl font-extralight tracking-tighter text-gray-300 leading-none">
-            {currentDate.getHours() < 12 ? 'Goedemorgen' : currentDate.getHours() < 18 ? 'Goedemiddag' : 'Goedenavond'}
-          </h1>
-          <div className="flex items-center gap-4 px-1">
-            <CalendarIcon className="w-5 h-5 text-gray-200" />
-            <p className="text-gray-400 text-xs uppercase tracking-[0.4em] font-black">
-              {currentDate.toLocaleDateString('nl-BE', { weekday: 'long', month: 'long', day: 'numeric' })}
-            </p>
+        {/* Left Section: Greeting + Date + Clock */}
+        <div className="flex flex-col md:flex-row md:items-center gap-6 lg:gap-12 z-10">
+          <div className="flex flex-col gap-1.5">
+            <h1 className="text-4xl sm:text-6xl font-extralight tracking-tighter text-gray-300 leading-none">
+              {currentDate.getHours() < 12 ? 'Goedemorgen' : currentDate.getHours() < 18 ? 'Goedemiddag' : 'Goedenavond'}
+            </h1>
+            <div className="flex items-center gap-4 px-1">
+              <CalendarIcon className="w-5 h-5 text-gray-200" />
+              <p className="text-gray-400 text-xs uppercase tracking-[0.4em] font-black">
+                {currentDate.toLocaleDateString('nl-BE', { weekday: 'long', month: 'long', day: 'numeric' })}
+              </p>
+            </div>
+          </div>
+
+          {/* Clock right next to greeting */}
+          <div className="text-[5.5rem] sm:text-[7rem] lg:text-[8rem] font-black tracking-tighter text-gray-900 leading-none tabular-nums py-2 md:py-0">
+            {currentDate.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}
           </div>
         </div>
 
-        {/* Center Section: Clock */}
-        <div className="md:absolute md:left-1/2 md:-translate-x-1/2 text-[7rem] sm:text-[9rem] font-black tracking-tighter text-gray-900 leading-none tabular-nums py-4 md:py-0">
-          {currentDate.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}
-        </div>
-
         {/* Right Section: Actions */}
-        <div className="md:w-1/3 flex items-center justify-end gap-10 z-10">
+        <div className="flex items-center justify-end gap-10 z-10">
           <div className="flex items-center gap-8">
             {accessToken && (
 				  <button 
