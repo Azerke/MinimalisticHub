@@ -202,8 +202,8 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
   }, [selectedWeekType]);
 
   return (
-    <div className="bg-white rounded-[3rem] shadow-sm border border-gray-100 flex flex-col overflow-hidden h-[1120px]">
-      <div className="p-8 border-b border-gray-100 shrink-0">
+    <div className="bg-white rounded-[3rem] shadow-sm border border-gray-100 flex flex-col overflow-hidden h-[840px]">
+      <div className="p-6 border-b border-gray-100 shrink-0">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-6">
             <span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.4em]">
@@ -282,20 +282,20 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
 
                 return ( 
                   <div key={idx} className={`bg-white flex flex-col min-w-0 ${today ? 'bg-blue-50/20' : ''} relative`}>
-                    <div className={`p-6 text-center border-b border-gray-50 shrink-0 ${today ? 'bg-blue-500/5' : ''}`}>
+                    <div className={`py-3.5 px-2 text-center border-b border-gray-50 shrink-0 ${today ? 'bg-blue-500/5' : ''}`}>
                       <div className={`text-[11px] font-black tracking-widest ${today ? 'text-blue-600' : 'text-gray-400'}`}>
                         {date.toLocaleDateString('nl-BE', { weekday: 'short' }).toUpperCase()}
                       </div>
                       <div className="flex items-center justify-center gap-2 mt-1">
-                        <div className={`text-3xl font-black ${today ? 'text-blue-600' : 'text-gray-800'}`}>{date.getDate()}</div>
+                        <div className={`text-2xl font-black ${today ? 'text-blue-600' : 'text-gray-800'}`}>{date.getDate()}</div>
                         {wasteEvents.length > 0 && (
                           <div className="flex items-center gap-1">
                             {wasteEvents.map(w => {
                               const t = w.title.trim().toUpperCase();
-                              if (t === 'PMD') return <Recycle key={w.id} size={20} className="text-blue-500" strokeWidth={2.5} />;
-                              if (t === 'RA') return <Trash2 key={w.id} size={20} className="text-gray-400" strokeWidth={2.5} />;
-                              if (t === 'P/K') return <Package key={w.id} size={20} className="text-amber-500" strokeWidth={2.5} />;
-                              if (t === 'GLA') return <Wine key={w.id} size={20} className="text-blue-600" strokeWidth={2.5} />;
+                              if (t === 'PMD') return <Recycle key={w.id} size={18} className="text-blue-500" strokeWidth={2.5} />;
+                              if (t === 'RA') return <Trash2 key={w.id} size={18} className="text-gray-400" strokeWidth={2.5} />;
+                              if (t === 'P/K') return <Package key={w.id} size={18} className="text-amber-500" strokeWidth={2.5} />;
+                              if (t === 'GLA') return <Wine key={w.id} size={18} className="text-blue-600" strokeWidth={2.5} />;
                               return null;
                             })}
                           </div>
@@ -334,13 +334,13 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
                       ))} 
                     </div>
 
-                    <div className="mt-auto border-t border-gray-100 bg-amber-50/10 p-4">
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-1">Menu</span>
+                    <div className="mt-auto border-t border-gray-100 bg-amber-50/10 p-2.5">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-0.5">Menu</span>
                         {foodEvents.length > 0 ? foodEvents.map(f => {
                           const displayFood = f.title.replace(/^Eten\s+/i, '');
                           return (
-                            <div key={f.id} className="flex items-center gap-3 animate-in fade-in slide-in-from-bottom-1">
+                            <div key={f.id} className="flex items-center gap-2 animate-in fade-in slide-in-from-bottom-1">
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setItemToDelete(f); }}
                                 className="hover:scale-110 active:scale-90 transition-transform cursor-pointer"
@@ -357,9 +357,9 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
                           <div className="relative">
                             <button 
                               onClick={() => setActiveFoodAdd(activeFoodAdd === dateKey ? null : dateKey)}
-                              className="w-full h-12 flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-400 rounded-xl transition-all active:scale-95 group"
+                              className="w-full h-9 flex items-center justify-center bg-amber-50 hover:bg-amber-100 text-amber-400 rounded-xl transition-all active:scale-95 group"
                             >
-                              <Plus size={24} className="group-hover:rotate-90 transition-transform" />
+                              <Plus size={20} className="group-hover:rotate-90 transition-transform" />
                             </button>
                             
                             {activeFoodAdd === dateKey && (
@@ -386,7 +386,7 @@ export const WeekAgendaWidget: React.FC<WeekAgendaWidgetProps> = ({
                       </div>
                       
                       {solarForecast && (
-                        <div className="mt-3 pt-3 border-t border-amber-200/40 flex items-center justify-between animate-in fade-in">
+                        <div className="mt-1.5 pt-1.5 border-t border-amber-200/40 flex items-center justify-between animate-in fade-in">
                           <div className="flex items-center gap-2">
                              <Sun size={14} className="text-amber-500 fill-amber-50" />
                              <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest"></span>

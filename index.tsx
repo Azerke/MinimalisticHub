@@ -900,7 +900,7 @@ const App: React.FC = () => {
 			/>
 		  )}
 		  
-		  {/* Week Agenda Widget - Always visible, always 1180px high */}
+		  {/* Week Agenda Widget - Always visible, 840px high */}
 		  <WeekAgendaWidget 
 			accessToken={accessToken} 
 			items={agendaItems} 
